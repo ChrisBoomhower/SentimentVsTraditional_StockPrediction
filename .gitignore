@@ -2,3 +2,15 @@
 .Rhistory
 .RData
 .Ruserdata
+/Analysis/Data/StockTwits/AAPL
+/Analysis/Data/StockTwits/GE
+/Analysis/Data/StockTwits/XOM
+/Analysis/Data/StockTwits/KO
+/Analysis/Data/StockTwits/PG
+/Analysis/Data/TwitterData/XOM
+/Analysis/Data/TwitterData/AAPL
+/Analysis/Data/TwitterData/GE
+/Analysis/Data/TwitterData/KO
+/Analysis/Data/TwitterData/PG
+/Analysis/Data/TwitterData/*.Rout
+/Analysis/Data/StockTwits/*.Rout

@@ -6,7 +6,7 @@
 ##                  portfolio ticker symbols. The data are stored
 ##                  in external RDS files for later processing.
 ##
-## Frequency:       Scheduled to run hourly
+## Frequency:       Scheduled to run every 15 minutes
 
 library(jsonlite)
 require(plyr)
@@ -33,6 +33,6 @@ getTwit <- function(symb){
 }
 
 ## Get twit data for portfolio tickers based on folder listings
-for(s in list.files(pattern = '[^getStockTwits.R]')){
-    getTwit(s)
+for(s in list.files(pattern = '[^getStockTwits.R|getStockTwits.bat|getStockTwits.Rout]')){
+    try(print(getTwit(s)))
 }
