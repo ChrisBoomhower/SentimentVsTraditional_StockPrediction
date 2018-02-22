@@ -17,6 +17,7 @@ setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPre
 date<-Sys.time()
 date<-as.character(date)
 date <- gsub(":","_", date)
+date
 
 ## Function to obtain and write twit data to dataframe class
 getTwit <- function(symb){

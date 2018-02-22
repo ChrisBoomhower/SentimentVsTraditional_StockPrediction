@@ -9,7 +9,7 @@ require(jsonlite)
 
 ## Consolidate StockTwits ticker symbol data into single dataframes with duplicates dropped
 setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPrediction/Analysis/Data/StockTwits")
-ST.tickers <- list.files(pattern = '[^getStockTwits.R]')
+ST.tickers <- list.files(pattern = '[^getStockTwits.R|getStockTwits.bat|getStockTwits.Rout]')
 for(s in ST.tickers){
     setwd(s)
 
@@ -25,7 +25,7 @@ rm(df)
 
 ## Consolidate Twitter ticker symbol data into single dataframes with duplicates dropped
 setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPrediction/Analysis/Data/TwitterData")
-T.tickers <- list.files(pattern = '[^getTweets.R]')
+T.tickers <- list.files(pattern = '[^getTweets.R|getTweets.bat|getTweets.Rout]')
 for(s in T.tickers){
     setwd(s)
     
@@ -38,3 +38,17 @@ for(s in T.tickers){
 }
 rm(df)
 
+## Consolidate YahooFinance ticker symbol data into single dataframes with duplicates dropped
+setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPrediction/Analysis/Data/YahooFinance")
+YF.tickers <- list.files(pattern = '[^getNews.R|getNews.bat|getNews.Rout]')
+for(s in YF.tickers){
+    setwd(s)
+    
+    files <- list.files(pattern = '\\.RDS$')
+    dat_list <- lapply(files, readRDS)
+    df <- ldply(dat_list, data.frame)
+    assign(paste0(s,".YF"), unique(df)) #Drop duplicates and assign to variable named after ticker symbol
+    
+    setwd('..')
+}
+rm(df)

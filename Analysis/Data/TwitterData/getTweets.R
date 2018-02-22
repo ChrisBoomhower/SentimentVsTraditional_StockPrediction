@@ -6,7 +6,7 @@
 ##                  portfolio ticker symbols. The data are stored
 ##                  in external RDS files for later processing.
 ##
-## Frequency:       Scheduled to run every 1 hour
+## Frequency:       Scheduled to run every 30 minutes
 
 setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPrediction/Analysis/Data/TwitterData")
 
@@ -18,6 +18,7 @@ library(taskscheduleR)
 date<-Sys.time()
 date<-as.character(date)
 date <- gsub(":","_", date)
+date
 
 ## Get API OAuth credentials and authorize account
 api_key <- readLines("C:/Users/Owner/OneDrive for Business/Semester_6/Special Topics in Data Science/Project 1/OAuth/API_KEY.txt")
@@ -30,7 +31,7 @@ setup_twitter_oauth(api_key, api_secret, access_token=access_token, access_secre
 ## Function to obtain and write twit data to dataframe class
 getTweet <- function(symb){
     ## Get tweets
-    recentTweets <- searchTwitter(symb, n=5000)
+    recentTweets <- searchTwitter(paste0("#",symb), n=1000, lang = "en", )
     recentTweets.df <- twListToDF(recentTweets)
     
     ## Save twits
@@ -42,7 +43,7 @@ getTweet <- function(symb){
     return(paste(symb, "data saved"))
 }
 
-## Get twit data for portfolio tickers based on folder listings
+## Get tweet data for portfolio tickers based on folder listings
 for(s in list.files(pattern = '[^getTweets.R|getTweets.bat|getTweets.Rout]')){
     try(print(getTweet(s)))
 }
