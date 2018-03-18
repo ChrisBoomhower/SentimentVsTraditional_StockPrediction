@@ -108,7 +108,7 @@ positive = c(positive, 'wtf', 'epicfail', 'bearish', 'bear')
 negative = c(negative, 'upgrade', ':)', 'bullish', 'bull')
 
 ## Following function modified from https://github.com/jeffreybreen/twitter-sentiment-analysis-tutorial-201107/blob/master/R/sentiment.R
-make.score <- function(sentence, pos.words, neg.words, cloud) {
+make.score <- function(sentence, pos.words, neg.words) {
     
     ## clean up sentence contents:
     sentence = gsub('[[:punct:]]', '', sentence)
@@ -133,8 +133,9 @@ make.score <- function(sentence, pos.words, neg.words, cloud) {
     ## calculate score based on summations
     score = sum(pos.matches) - sum(neg.matches)
     
-    if(cloud) return(list(words, pos.matches, neg.matches)) #Use when generating df for Tableau wordcloud
-    else return(score) #Use when getting scores
+    #if(cloud) return(list(words, pos.matches, neg.matches)) #Use when generating df for Tableau wordcloud
+    #else return(score) #Use when getting scores
+    return(score)
 }
 
 score.sentiment = function(sentences, pos.words, neg.words, feed, addition = '', cloud = FALSE, .progress='none'){
@@ -224,86 +225,62 @@ print(Sys.time() - start)
 ## Cleanup unneeded objects
 rm(list=ls(pattern = '.\\.scores$'))
 rm(cols.u, files, s, ST.tickers, start, T.tickers, YF.tickers)
+gc()
 
 ######################################
 ####### GET WORDS FOR TABLEAUE #######
 ######################################
 
-if(Tableau){
+if(Tableau){ #Takes ~13hrs to run, so only run when needed
+    word.freq <- function(sentence) {
+        
+        ## clean up sentence contents:
+        sentence = gsub('[[:punct:]]', '', sentence)
+        sentence = gsub('[[:cntrl:]]', '', sentence)
+        sentence = gsub('\\d+', '', sentence)
+        
+        ## convert to lower case:
+        sentence = try(tolower(sentence))
+        
+        ## split into words and reduce list of single list object to just list
+        word.list = str_split(sentence, '\\s+')
+        words = unlist(word.list)
+        
+        words.add <- table(words)
+        sim <- intersect(names(words.all), names(words.add))
+        words.all <<- c(words.all[!(names(words.all) %in% sim)], #Update global variable
+                 words.add[!(names(words.add) %in% sim)],
+                 words.all[sim] + words.add[sim])
+        
+        return(NA) #Use when getting scores
+    }
     ## Word generation wrapper function
-    genWords <- function(feed, message, df){
+    genWords <- function(feed, message){
         start <- Sys.time() #Start timer
+        
         for(s in feed){
             print(s)
             sentences <- try(iconv(get(s)[[message]], 'UTF-8', 'latin1'))
-            cloud.D <- lapply(sentences, make.score, positive, negative, cloud = TRUE)
-            temp <- ldply(cloud.D, data.frame)
-            
-            W <- sapply(cloud.D, function(x) x[1])
-            P <- sapply(cloud.D, function(x) x[2])
-            N <- sapply(cloud.D, function(x) x[3])
-            temp <- data.frame(Word = unlist(W), Good = unlist(P), Bad = unlist(N), TickerSource = s)
-            temp$Dict <- ifelse(temp$Good == TRUE, "Good",
-                                ifelse(temp$Bad == TRUE, "Bad", "Neutral"))
-            
-            df = rbind(df, temp)
+            lapply(sentences, word.freq)
         }
-        rm(temp,W,P,N,cloud.D)
+            
         print(Sys.time() - start)
-        return(df)
+        return(paste(feed, "word extraction for Tablaue complete"))
     }
     
-    ## Extract StockTwits words
-    words.ST <- data.frame(Word = factor(), Good = logical(), Bad = logical(), TickerSource = character(), Dict = character())
-    words.ST <- genWords(ST, "body", words.ST)
+    ## Initialize words.all table (purposely use numeric type since numbers removed from message texts)
+    words.all <- table(1)
     
+    ## Extract words for Tableau visualizations
+    genWords(ST, "body")
+    genWords(YF, "description")
+    genWords(Tw, "text")
     
-    # for(s in ST[1]){
-    #     sentences <- try(iconv(get(s)[["body"]], 'UTF-8', 'latin1'))
-    #     cloud.D <- lapply(sentences, make.score, positive, negative, cloud = TRUE)
-    #     temp <- ldply(cloud.D, data.frame)
-    #     
-    #     W <- sapply(cloud.D, function(x) x[1])
-    #     P <- sapply(cloud.D, function(x) x[2])
-    #     N <- sapply(cloud.D, function(x) x[3])
-    #     temp <- data.frame(Word = unlist(W), Good = unlist(P), Bad = unlist(N), TickerSource = s)
-    #     temp$Dict <- ifelse(temp$Good == TRUE, "Good",
-    #                         ifelse(temp$Bad == TRUE, "Bad", "Neutral"))
-    #     
-    #     words.ST = rbind(words.YF, temp)
-    # }
-    
-    ## Extract Yahoo Finance words
-    words.YF <- data.frame(Word = factor(), Good = logical(), Bad = logical(), TickerSource = character(), Dict = character())
-    words.YF <- genWords(YF, "description", words.YF)
-    
-    
-    ## Extract Twitter words (Extract Twitter data last so we can drop SF and YF data first)
-    rm(list=ls(pattern = '.\\.ST$'))
-    rm(list=ls(pattern = '.\\.YF$'))
-    
-    words.T <- data.frame(Word = factor(), Good = logical(), Bad = logical(), TickerSource = character(), Dict = character())
-    Tw.sym = c("AAPL.T", "AMZN.T", "Boeing.T", "DowDuPont.T", "Johnson&Johnson.T",
-               "JPM.T", "NEE.T", "Proctor&Gamble.T", "SPG.T", "Verizon.T", "Exxon.T")
-    words.T <- genWords(Tw.sym, "text", words.T)
-    
-    allWords <- rbind(words.ST, words.T, words.YF)
-    
-    # start <- Sys.time() #Start timer
-    # for(s in YF){
-    #     cloud.D <- lapply(get(s)[["description"]], make.score, positive, negative, cloud = TRUE)
-    #     temp <- ldply(cloud.D, data.frame)
-    #     
-    #     W <- sapply(cloud.D, function(x) x[1])
-    #     P <- sapply(cloud.D, function(x) x[2])
-    #     N <- sapply(cloud.D, function(x) x[3])
-    #     temp <- data.frame(Word = unlist(W), Good = unlist(P), Bad = unlist(N), TickerSource = s)
-    #     temp$Dict <- ifelse(temp$Good == TRUE, "Good",
-    #                         ifelse(temp$Bad == TRUE, "Bad", "Neutral"))
-    #     
-    #     words.YF = rbind(words.YF, temp)
-    # }
-    # write.csv(words.YF, "Tableau/words.YF.csv")
-    # rm(temp,W,P,N)
-    # print(Sys.time() - start)
+    ## Coerce words and word sentiment to dataframe
+    words.all.df <- as.data.frame(words.all, row.names = names(words.all))
+    words.all.df$Sentiment <- ifelse(rownames(words.all.df) %in% pos.words, "Good",
+                        ifelse(rownames(words.all.df) %in% neg.words, "Bad", "Neutral"))
+    names(words.all.df) <- c("Count", "Sentiment")
+    words.all.df <- words.all.df[!is.na(words.all.df$Count),]
+    words.all.df <- words.all.df[rownames(words.all.df) != 1,] #Remove the "1" initializer row
 }
