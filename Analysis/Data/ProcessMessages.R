@@ -35,6 +35,10 @@ for(s in ST.tickers){
     temp$likes.total <- ifelse(is.na(temp$likes.total), 0, temp$likes.total) #Fill NAs with 0
     df <- temp %>% group_by(id, body, created_at, user.id) %>% top_n(1, likes.total) #Inspired by https://stackoverflow.com/questions/24558328/how-to-select-the-row-with-the-maximum-value-in-each-group
 
+    ## Convert creation time to date format and convert UTC time to EST
+    df$created_at <- as.POSIXct(strptime(df$created_at,"%FT%H:%M:%SZ", tz = "UTC"))
+    df$created_at <- format(df$created_at, tz="EST", usetz=TRUE)
+    
     assign(paste0(s,".ST"), df)
 
     setwd('..')
@@ -62,6 +66,9 @@ for(s in T.tickers){
     temp <- df[!duplicated(df[,cols.u]),]
     df <- temp %>% group_by(id, text, created, screenName) %>% top_n(1, favoriteCount) #Inspired by https://stackoverflow.com/questions/24558328/how-to-select-the-row-with-the-maximum-value-in-each-group
 
+    ## Convert UTC time to EST
+    df$created <- format(df$created, tz="EST", usetz=TRUE)
+    
     assign(paste0(s,".T"), df)
 
     setwd('..')
@@ -83,8 +90,12 @@ for(s in YF.tickers){
     dat_list <- lapply(files, readRDS)
     df <- ldply(dat_list, data.frame)
 
-    df <- df[!duplicated(df$description),]
-    assign(paste0(s,".YF"), df) #Drop duplicates and assign to variable named after ticker symbol
+    df <- df[!duplicated(df$description),] #Drop duplicates
+    
+    ## Ensure EST timestamps (EST appears to be default but just want to make sure)
+    df$created <- format(df$timestamp, tz="EST", usetz=TRUE)
+    
+    assign(paste0(s,".YF"), df) #Assign to variable named after ticker symbol
 
     setwd('..')
 }
@@ -232,7 +243,7 @@ gc()
 ######################################
 
 if(Tableau){ #Takes ~13hrs to run, so only run when needed
-    word.freq <- function(sentence) {
+    word.freq <- function(sentence, s) {
         
         ## clean up sentence contents:
         sentence = gsub('[[:punct:]]', '', sentence)
@@ -247,7 +258,15 @@ if(Tableau){ #Takes ~13hrs to run, so only run when needed
         words = unlist(word.list)
         
         words.add <- table(words)
-        sim <- intersect(names(words.all), names(words.add))
+        ## Combine with ticker by feed words
+        sim <- intersect(names(get(paste0("words.", s))), names(words.add)) #Process for combining tables inspired by https://stackoverflow.com/questions/12897220/how-to-merge-tables-in-r
+        assign(paste0("words.", s), c(get(paste0("words.", s))[!(names(get(paste0("words.", s))) %in% sim)], #Update global variable
+                        words.add[!(names(words.add) %in% sim)],
+                        get(paste0("words.", s))[sim] + words.add[sim]),
+               envir = .GlobalEnv)
+        
+        ## Combine with all words table (contains words for all feed types)
+        sim <- intersect(names(words.all), names(words.add)) #Process for combining tables inspired by https://stackoverflow.com/questions/12897220/how-to-merge-tables-in-r
         words.all <<- c(words.all[!(names(words.all) %in% sim)], #Update global variable
                  words.add[!(names(words.add) %in% sim)],
                  words.all[sim] + words.add[sim])
@@ -259,9 +278,30 @@ if(Tableau){ #Takes ~13hrs to run, so only run when needed
         start <- Sys.time() #Start timer
         
         for(s in feed){
-            print(s)
+            ## Initialize ticker table (purposely use numeric type since numbers removed from message texts)
+            assign(paste0("words.", s), table(1), envir = .GlobalEnv) #Assign to global variable named after ticker symbol
+            
+            ## Apply word.freq function
             sentences <- try(iconv(get(s)[[message]], 'UTF-8', 'latin1'))
-            lapply(sentences, word.freq)
+            lapply(sentences, word.freq, s)
+            
+            ## Coerce words and word sentiment to dataframe
+            df.w <- as.data.frame(get(paste0("words.", s)), row.names = names(get(paste0("words.", s))))
+            df.w$Sentiment <- ifelse(rownames(df.w) %in% pos.words, "Good",
+                                             ifelse(rownames(df.w) %in% neg.words, "Bad", "Neutral"))
+            names(df.w) <- c("Count", "Sentiment")
+            df.w <- df.w[!is.na(df.w$Count),]
+            df.w <- df.w[rownames(df.w) != 1,] #Remove the "1" initializer row
+            
+            ## Add source tag for easy filtering and aggregation
+            df.w$Media_Source <- unlist(strsplit(s,"\\."))[2]
+            
+            ## Add source tag for easy filtering and aggregation
+            df.w$Ticker <- unlist(strsplit(s,"\\."))[1]
+            
+            ## Write ticker word frequency df to global environment
+            assign(paste0("words.", s), df.w, envir = .GlobalEnv) #Assign to variable named after ticker symbol
+            
         }
             
         print(Sys.time() - start)
