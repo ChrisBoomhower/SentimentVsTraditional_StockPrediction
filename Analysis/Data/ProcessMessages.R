@@ -9,7 +9,7 @@ require(jsonlite)
 require(stringr)
 require(dplyr)
 
-Tableau = FALSE #Set conditional term for processing word dataframes
+Tableau = TRUE #Set conditional term for processing word dataframes
 
 #################################
 ###### DATA CONSOLIDATION #######
@@ -242,7 +242,7 @@ gc()
 ####### GET WORDS FOR TABLEAUE #######
 ######################################
 
-if(Tableau){ #Takes ~13hrs to run, so only run when needed
+if(Tableau){ #Takes ~24hrs to run, so only run when needed
     word.freq <- function(sentence, s) {
         
         ## clean up sentence contents:
@@ -265,11 +265,11 @@ if(Tableau){ #Takes ~13hrs to run, so only run when needed
                         get(paste0("words.", s))[sim] + words.add[sim]),
                envir = .GlobalEnv)
         
-        ## Combine with all words table (contains words for all feed types)
-        sim <- intersect(names(words.all), names(words.add)) #Process for combining tables inspired by https://stackoverflow.com/questions/12897220/how-to-merge-tables-in-r
-        words.all <<- c(words.all[!(names(words.all) %in% sim)], #Update global variable
-                 words.add[!(names(words.add) %in% sim)],
-                 words.all[sim] + words.add[sim])
+        # ## Combine with all words table (contains words for all feed types)
+        # sim <- intersect(names(words.all), names(words.add)) #Process for combining tables inspired by https://stackoverflow.com/questions/12897220/how-to-merge-tables-in-r
+        # words.all <<- c(words.all[!(names(words.all) %in% sim)], #Update global variable
+        #          words.add[!(names(words.add) %in% sim)],
+        #          words.all[sim] + words.add[sim])
         
         return(NA) #Use when getting scores
     }
@@ -287,8 +287,8 @@ if(Tableau){ #Takes ~13hrs to run, so only run when needed
             
             ## Coerce words and word sentiment to dataframe
             df.w <- as.data.frame(get(paste0("words.", s)), row.names = names(get(paste0("words.", s))))
-            df.w$Sentiment <- ifelse(rownames(df.w) %in% pos.words, "Good",
-                                             ifelse(rownames(df.w) %in% neg.words, "Bad", "Neutral"))
+            df.w$Sentiment <- ifelse(rownames(df.w) %in% positive, "Good",
+                                             ifelse(rownames(df.w) %in% negative, "Bad", "Neutral"))
             names(df.w) <- c("Count", "Sentiment")
             df.w <- df.w[!is.na(df.w$Count),]
             df.w <- df.w[rownames(df.w) != 1,] #Remove the "1" initializer row
@@ -309,18 +309,28 @@ if(Tableau){ #Takes ~13hrs to run, so only run when needed
     }
     
     ## Initialize words.all table (purposely use numeric type since numbers removed from message texts)
-    words.all <- table(1)
+    # words.all <- table(1)
     
     ## Extract words for Tableau visualizations
     genWords(ST, "body")
     genWords(YF, "description")
     genWords(Tw, "text")
     
-    ## Coerce words and word sentiment to dataframe
-    words.all.df <- as.data.frame(words.all, row.names = names(words.all))
-    words.all.df$Sentiment <- ifelse(rownames(words.all.df) %in% pos.words, "Good",
-                        ifelse(rownames(words.all.df) %in% neg.words, "Bad", "Neutral"))
-    names(words.all.df) <- c("Count", "Sentiment")
-    words.all.df <- words.all.df[!is.na(words.all.df$Count),]
-    words.all.df <- words.all.df[rownames(words.all.df) != 1,] #Remove the "1" initializer row
+    # ## Coerce words and word sentiment to dataframe
+    # words.all.df <- as.data.frame(words.all, row.names = names(words.all))
+    # words.all.df$Sentiment <- ifelse(rownames(words.all.df) %in% positive, "Good",
+    #                     ifelse(rownames(words.all.df) %in% negative, "Bad", "Neutral"))
+    # names(words.all.df) <- c("Count", "Sentiment")
+    # words.all.df <- words.all.df[!is.na(words.all.df$Count),]
+    # words.all.df <- words.all.df[rownames(words.all.df) != 1,] #Remove the "1" initializer row
+    # 
+    # ## Export words.all for Tableau
+    # write.csv(words.all.df, "Tableau/wordsCombined.csv")
+    
+    ## Combine and export words by ticker/source for Tableau
+    wo <- ls(pattern = '^words') #Get list of word dataframe objects
+    wo <- wo[!unlist(lapply(wo, grepl, '[words.all|words.all.df]'))] #Remove overall words lists
+    words.by.source <- do.call(rbind, lapply(wo, get))
+    words.by.source$Word <- gsub('[[:digit:]]+', '', rownames(words.by.source))
+    write.csv(words.by.source, "Tableau/wordsBySource.csv", row.names = FALSE)
 }
