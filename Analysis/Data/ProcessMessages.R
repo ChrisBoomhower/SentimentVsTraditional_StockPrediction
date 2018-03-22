@@ -8,8 +8,10 @@ require(plyr)
 require(jsonlite)
 require(stringr)
 require(dplyr)
+require(DataCombine)
+require(lubridate)
 
-Tableau = TRUE #Set conditional term for processing word dataframes
+Tableau = FALSE #Set conditional term for processing word dataframes
 
 #################################
 ###### DATA CONSOLIDATION #######
@@ -37,7 +39,7 @@ for(s in ST.tickers){
 
     ## Convert creation time to date format and convert UTC time to EST
     df$created_at <- as.POSIXct(strptime(df$created_at,"%FT%H:%M:%SZ", tz = "UTC"))
-    df$created_at <- format(df$created_at, tz="EST", usetz=TRUE)
+    df$created_at <- format(df$created_at, tz="EST")
     
     assign(paste0(s,".ST"), df)
 
@@ -67,7 +69,7 @@ for(s in T.tickers){
     df <- temp %>% group_by(id, text, created, screenName) %>% top_n(1, favoriteCount) #Inspired by https://stackoverflow.com/questions/24558328/how-to-select-the-row-with-the-maximum-value-in-each-group
 
     ## Convert UTC time to EST
-    df$created <- format(df$created, tz="EST", usetz=TRUE)
+    df$created <- format(df$created, tz="EST")
     
     assign(paste0(s,".T"), df)
 
@@ -93,7 +95,7 @@ for(s in YF.tickers){
     df <- df[!duplicated(df$description),] #Drop duplicates
     
     ## Ensure EST timestamps (EST appears to be default but just want to make sure)
-    df$created <- format(df$timestamp, tz="EST", usetz=TRUE)
+    df$created <- format(df$timestamp, tz="EST")
     
     assign(paste0(s,".YF"), df) #Assign to variable named after ticker symbol
 
@@ -149,7 +151,7 @@ make.score <- function(sentence, pos.words, neg.words) {
     return(score)
 }
 
-score.sentiment = function(sentences, pos.words, neg.words, feed, addition = '', cloud = FALSE, .progress='none'){
+score.sentiment = function(sentences, pos.words, neg.words, feed, addition = '', .progress='none'){
     if(feed == 'ST'){
         sentences <- ifelse(addition == '', sentences, paste(sentences, addition)) #Tag on additional column content when needed
     }
@@ -157,7 +159,7 @@ score.sentiment = function(sentences, pos.words, neg.words, feed, addition = '',
 
     # we got a vector of sentences. plyr will handle a list or a vector as an "l" for us
     # we want a simple array of scores back, so we use "l" + "a" + "ply" = laply:
-    scores = laply(sentences, make.score, pos.words, neg.words, cloud, .progress=.progress )
+    scores = laply(sentences, make.score, pos.words, neg.words, .progress=.progress )
     
     scores.df = data.frame(score=scores, text=sentences)
     return(scores.df)
@@ -232,6 +234,158 @@ print(Sys.time() - start)
 
 #FOLLOWING LINE FOR DEBUG ONLY
 #temp <- score.sentiment(AAPL.YF[["description"]], positive, negative, feed = "YF", addition = "", .progress='text')
+
+######################################
+####### Combine Ticker Sources #######
+######################################
+
+## Prep for hourly predictions
+AAPL.ST.small <- as.data.frame(AAPL.ST[,c("created_at", "score")])
+colnames(AAPL.ST.small) <- c("timestamp", "ST.score")
+AAPL.ST.small$timestamp <- as.character(format(AAPL.ST.small$timestamp, tz="EST"))
+AAPL.ST.small$timestamp <- ymd_hms(AAPL.ST.small$timestamp, tz="EST")
+AAPL.ST.small$date <- date(AAPL.ST.small$timestamp) #date/hour extraction inspired by https://stackoverflow.com/questions/10705328/extract-hours-and-seconds-from-posixct-for-plotting-purposes-in-r
+AAPL.ST.small$hour <- hour(AAPL.ST.small$timestamp)
+AAPL.ST.small <- aggregate(ST.score~date+hour, AAPL.ST.small, sum)
+AAPL.ST.small <- AAPL.ST.small[with(AAPL.ST.small, order(date, hour)),]
+for(i in seq(1,72)) AAPL.ST.small <- slide(AAPL.ST.small, Var = "ST.score", slideBy = -i)
+
+AAPL.T.small <- as.data.frame(AAPL.T[,c("created", "score")])
+colnames(AAPL.T.small) <- c("timestamp", "T.score")
+AAPL.T.small$timestamp <- as.character(format(AAPL.T.small$timestamp, tz="EST"))
+AAPL.T.small$timestamp <- ymd_hms(AAPL.T.small$timestamp, tz="EST")
+AAPL.T.small$date <- date(AAPL.T.small$timestamp)
+AAPL.T.small$hour <- hour(AAPL.T.small$timestamp)
+AAPL.T.small <- aggregate(T.score~date+hour, AAPL.T.small, sum)
+AAPL.T.small <- AAPL.T.small[with(AAPL.T.small, order(date, hour)),]
+for(i in seq(1,72)) AAPL.T.small <- slide(AAPL.T.small, Var = "T.score", slideBy = -i)
+
+AAPL.YF.small <- as.data.frame(AAPL.YF[,c("timestamp", "score")])
+colnames(AAPL.YF.small) <- c("timestamp", "YF.score")
+AAPL.YF.small$timestamp <- as.character(format(AAPL.YF.small$timestamp, tz="EST"))
+AAPL.YF.small$timestamp <- ymd_hms(AAPL.YF.small$timestamp, tz="EST")
+AAPL.YF.small$date <- date(AAPL.YF.small$timestamp)
+AAPL.YF.small$hour <- hour(AAPL.YF.small$timestamp)
+AAPL.YF.small <- aggregate(YF.score~date+hour, AAPL.YF.small, sum)
+AAPL.YF.small <- AAPL.YF.small[with(AAPL.YF.small, order(date, hour)),]
+for(i in seq(1,72)) AAPL.YF.small <- slide(AAPL.YF.small, Var = "YF.score", slideBy = -i)
+
+AAPL <- merge(AAPL.ST.small, AAPL.T.small, by = c("date", "hour"))
+AAPL <- merge(AAPL, AAPL.YF.small, by = c("date", "hour"))
+AAPL <- AAPL[with(AAPL, order(date, hour)),]
+AAPL <- tail(AAPL, -72) #Drop rows with lagged NA values
+
+fill <- seq(ymd_h(paste(AAPL[1, "date"], AAPL[1, "hour"]), tz = "EST"),
+    ymd_h(paste(AAPL[nrow(AAPL)-1, "date"], AAPL[nrow(AAPL)-1, "hour"]),tz = "EST"),
+    by="hour")
+AAPL <- full_join(AAPL, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
+
+
+## Prep for day-to-day predictions
+
+# AAPL.ST.small <- as.data.frame(AAPL.ST[,c("created_at", "score")])
+# colnames(AAPL.ST.small) <- c("timestamp", "ST.score")
+# AAPL.ST.small$timestamp <- as.Date(format(AAPL.ST.small$timestamp, tz="EST"))
+# AAPL.ST.small <- aggregate(ST.score~timestamp, AAPL.ST.small, sum)
+# AAPL.ST.small <- slide(AAPL.ST.small, Var = "ST.score", slideBy = -1)
+# AAPL.ST.small <- slide(AAPL.ST.small, Var = "ST.score", slideBy = -2)
+# AAPL.ST.small <- slide(AAPL.ST.small, Var = "ST.score", slideBy = -3)
+# 
+# AAPL.T.small <- AAPL.T[,c("created", "score")]
+# colnames(AAPL.T.small) <- c("timestamp", "T.score")
+# AAPL.T.small$timestamp <- as.Date(format(AAPL.T.small$timestamp, tz="EST"))
+# AAPL.T.small <- aggregate(T.score~timestamp, AAPL.T.small, sum)
+# AAPL.T.small <- slide(AAPL.T.small, Var = "T.score", slideBy = -1)
+# AAPL.T.small <- slide(AAPL.T.small, Var = "T.score", slideBy = -2)
+# AAPL.T.small <- slide(AAPL.T.small, Var = "T.score", slideBy = -3)
+# 
+# AAPL.YF.small <- AAPL.YF[,c("timestamp", "score")]
+# colnames(AAPL.YF.small) <- c("timestamp", "YF.score")
+# AAPL.YF.small$timestamp <- as.Date(format(AAPL.YF.small$timestamp, tz="EST"))
+# AAPL.YF.small <- aggregate(YF.score~timestamp, AAPL.YF.small, sum)
+# AAPL.YF.small <- slide(AAPL.YF.small, Var = "YF.score", slideBy = -1)
+# AAPL.YF.small <- slide(AAPL.YF.small, Var = "YF.score", slideBy = -2)
+# AAPL.YF.small <- slide(AAPL.YF.small, Var = "YF.score", slideBy = -3)
+# 
+# AAPL <- merge(AAPL.ST.small, AAPL.T.small, by = "timestamp")
+# AAPL <- merge(AAPL, AAPL.YF.small, by = "timestamp")
+
+
+
+# AMZN.ST.small <- AMZN.ST[,c("created_at", "score")]
+# colnames(AMZN.ST.small) <- c("timestamp", "score")
+# AMZN.T.small <- AMZN.T[,c("created", "score")]
+# colnames(AMZN.T.small) <- c("timestamp", "score")
+# AMZN.YF.small <- AMZN.YF[,c("timestamp", "score")]
+# AMZN <- as.data.frame(rbind(AMZN.ST.small,AMZN.T.small,AMZN.YF.small))
+# 
+# BA.ST.small <- BA.ST[,c("created_at", "score")]
+# colnames(BA.ST.small) <- c("timestamp", "score")
+# Boeing.T.small <- Boeing.T[,c("created", "score")]
+# colnames(Boeing.T.small) <- c("timestamp", "score")
+# BA.YF.small <- BA.YF[,c("timestamp", "score")]
+# BA <- as.data.frame(rbind(BA.ST.small,Boeing.T.small,BA.YF.small))
+# 
+# DWDP.ST.small <- DWDP.ST[,c("created_at", "score")]
+# colnames(DWDP.ST.small) <- c("timestamp", "score")
+# DowDuPont.T.small <- DowDuPont.T[,c("created", "score")]
+# colnames(DowDuPont.T.small) <- c("timestamp", "score")
+# DWDP.YF.small <- DWDP.YF[,c("timestamp", "score")]
+# DWDP <- as.data.frame(rbind(DWDP.ST.small,DowDuPont.T.small,DWDP.YF.small))
+# 
+# JNJ.ST.small <- JNJ.ST[,c("created_at", "score")]
+# colnames(JNJ.ST.small) <- c("timestamp", "score")
+# JNJ.T.small <- JNJ.T[,c("created", "score")]
+# colnames(JNJ.T.small) <- c("timestamp", "score")
+# JNJ.YF.small <- JNJ.YF[,c("timestamp", "score")]
+# JNJ <- as.data.frame(rbind(JNJ.ST.small,JNJ.T.small,JNJ.YF.small))
+# 
+# JPM.ST.small <- JPM.ST[,c("created_at", "score")]
+# colnames(JPM.ST.small) <- c("timestamp", "score")
+# JPM.T.small <- JPM.T[,c("created", "score")]
+# colnames(JPM.T.small) <- c("timestamp", "score")
+# JPM.YF.small <- JPM.YF[,c("timestamp", "score")]
+# JPM <- as.data.frame(rbind(JPM.ST.small,JPM.T.small,JPM.YF.small))
+# 
+# NEE.ST.small <- NEE.ST[,c("created_at", "score")]
+# colnames(NEE.ST.small) <- c("timestamp", "score")
+# NEE.T.small <- NEE.T[,c("created", "score")]
+# colnames(NEE.T.small) <- c("timestamp", "score")
+# NEE.YF.small <- NEE.YF[,c("timestamp", "score")]
+# NEE <- as.data.frame(rbind(NEE.ST.small,NEE.T.small,NEE.YF.small))
+# 
+# PG.ST.small <- PG.ST[,c("created_at", "score")]
+# colnames(PG.ST.small) <- c("timestamp", "score")
+# Proctor&Gamble.T.small <- Proctor&Gamble.T[,c("created", "score")]
+# colnames(Proctor&Gamble.T.small) <- c("timestamp", "score")
+# PG.YF.small <- PG.YF[,c("timestamp", "score")]
+# PG <- as.data.frame(rbind(PG.ST.small,Proctor&Gamble.T.small,PG.YF.small))
+# 
+# SPG.ST.small <- SPG.ST[,c("created_at", "score")]
+# colnames(SPG.ST.small) <- c("timestamp", "score")
+# SPG.T.small <- SPG.T[,c("created", "score")]
+# colnames(SPG.T.small) <- c("timestamp", "score")
+# SPG.YF.small <- SPG.YF[,c("timestamp", "score")]
+# SPG <- as.data.frame(rbind(SPG.ST.small,SPG.T.small,SPG.YF.small))
+# 
+# VZ.ST.small <- VZ.ST[,c("created_at", "score")]
+# colnames(VZ.ST.small) <- c("timestamp", "score")
+# Verizon.T.small <- Verizon.T[,c("created", "score")]
+# colnames(Verizon.T.small) <- c("timestamp", "score")
+# VZ.YF.small <- VZ.YF[,c("timestamp", "score")]
+# VZ <- as.data.frame(rbind(VZ.ST.small,Verizon.T.small,VZ.YF.small))
+# 
+# XOM.ST.small <- XOM.ST[,c("created_at", "score")]
+# colnames(XOM.ST.small) <- c("timestamp", "score")
+# Exxon.T.small <- Exxon.T[,c("created", "score")]
+# colnames(Exxon.T.small) <- c("timestamp", "score")
+# XOM.YF.small <- XOM.YF[,c("timestamp", "score")]
+# XOM <- as.data.frame(rbind(XOM.ST.small,Exxon.T.small,XOM.YF.small))
+
+######################################
+####### Creat Score Lag Columns ######
+######################################
+DataSlid1 <- slide(AAPL, Var = "T.score", slideBy = -1)
 
 ## Cleanup unneeded objects
 rm(list=ls(pattern = '.\\.scores$'))
