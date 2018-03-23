@@ -248,7 +248,13 @@ AAPL.ST.small$date <- date(AAPL.ST.small$timestamp) #date/hour extraction inspir
 AAPL.ST.small$hour <- hour(AAPL.ST.small$timestamp)
 AAPL.ST.small <- aggregate(ST.score~date+hour, AAPL.ST.small, sum)
 AAPL.ST.small <- AAPL.ST.small[with(AAPL.ST.small, order(date, hour)),]
+fill <- seq(ymd_h(paste(AAPL.ST.small[1, "date"], AAPL.ST.small[1, "hour"]), tz = "EST"),
+            ymd_h(paste(AAPL.ST.small[nrow(AAPL.ST.small)-1, "date"], AAPL.ST.small[nrow(AAPL.ST.small)-1, "hour"]),tz = "EST"),
+            by="hour")
+AAPL.ST.small <- full_join(AAPL.ST.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
 for(i in seq(1,72)) AAPL.ST.small <- slide(AAPL.ST.small, Var = "ST.score", slideBy = -i)
+AAPL.ST.small <- tail(AAPL.ST.small, -72) #Drop rows with lagged NA values
+AAPL.ST.small <- AAPL.ST.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
 
 AAPL.T.small <- as.data.frame(AAPL.T[,c("created", "score")])
 colnames(AAPL.T.small) <- c("timestamp", "T.score")
@@ -258,7 +264,13 @@ AAPL.T.small$date <- date(AAPL.T.small$timestamp)
 AAPL.T.small$hour <- hour(AAPL.T.small$timestamp)
 AAPL.T.small <- aggregate(T.score~date+hour, AAPL.T.small, sum)
 AAPL.T.small <- AAPL.T.small[with(AAPL.T.small, order(date, hour)),]
+fill <- seq(ymd_h(paste(AAPL.T.small[1, "date"], AAPL.T.small[1, "hour"]), tz = "EST"),
+            ymd_h(paste(AAPL.T.small[nrow(AAPL.T.small)-1, "date"], AAPL.T.small[nrow(AAPL.T.small)-1, "hour"]),tz = "EST"),
+            by="hour")
+AAPL.T.small <- full_join(AAPL.T.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
 for(i in seq(1,72)) AAPL.T.small <- slide(AAPL.T.small, Var = "T.score", slideBy = -i)
+AAPL.T.small <- tail(AAPL.T.small, -72) #Drop rows with lagged NA values
+AAPL.T.small <- AAPL.T.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
 
 AAPL.YF.small <- as.data.frame(AAPL.YF[,c("timestamp", "score")])
 colnames(AAPL.YF.small) <- c("timestamp", "YF.score")
@@ -268,18 +280,23 @@ AAPL.YF.small$date <- date(AAPL.YF.small$timestamp)
 AAPL.YF.small$hour <- hour(AAPL.YF.small$timestamp)
 AAPL.YF.small <- aggregate(YF.score~date+hour, AAPL.YF.small, sum)
 AAPL.YF.small <- AAPL.YF.small[with(AAPL.YF.small, order(date, hour)),]
+fill <- seq(ymd_h(paste(AAPL.YF.small[1, "date"], AAPL.YF.small[1, "hour"]), tz = "EST"),
+            ymd_h(paste(AAPL.YF.small[nrow(AAPL.YF.small)-1, "date"], AAPL.YF.small[nrow(AAPL.YF.small)-1, "hour"]),tz = "EST"),
+            by="hour")
+AAPL.YF.small <- full_join(AAPL.YF.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
 for(i in seq(1,72)) AAPL.YF.small <- slide(AAPL.YF.small, Var = "YF.score", slideBy = -i)
+AAPL.YF.small <- tail(AAPL.YF.small, -72) #Drop rows with lagged NA values
+AAPL.YF.small <- AAPL.YF.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
 
 AAPL <- merge(AAPL.ST.small, AAPL.T.small, by = c("date", "hour"))
 AAPL <- merge(AAPL, AAPL.YF.small, by = c("date", "hour"))
 AAPL <- AAPL[with(AAPL, order(date, hour)),]
-AAPL <- tail(AAPL, -72) #Drop rows with lagged NA values
 
-fill <- seq(ymd_h(paste(AAPL[1, "date"], AAPL[1, "hour"]), tz = "EST"),
-    ymd_h(paste(AAPL[nrow(AAPL)-1, "date"], AAPL[nrow(AAPL)-1, "hour"]),tz = "EST"),
-    by="hour")
-AAPL <- full_join(AAPL, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
-
+#fill <- seq(ymd_h(paste(AAPL[1, "date"], AAPL[1, "hour"]), tz = "EST"),
+#    ymd_h(paste(AAPL[nrow(AAPL)-1, "date"], AAPL[nrow(AAPL)-1, "hour"]),tz = "EST"),
+#    by="hour")
+#AAPL <- full_join(AAPL, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
+#AAPL <- tail(AAPL, -72) #Drop rows with lagged NA values
 
 ## Prep for day-to-day predictions
 
@@ -381,11 +398,6 @@ AAPL <- full_join(AAPL, data.frame(date = date(fill), hour = hour(fill))) #This 
 # colnames(Exxon.T.small) <- c("timestamp", "score")
 # XOM.YF.small <- XOM.YF[,c("timestamp", "score")]
 # XOM <- as.data.frame(rbind(XOM.ST.small,Exxon.T.small,XOM.YF.small))
-
-######################################
-####### Creat Score Lag Columns ######
-######################################
-DataSlid1 <- slide(AAPL, Var = "T.score", slideBy = -1)
 
 ## Cleanup unneeded objects
 rm(list=ls(pattern = '.\\.scores$'))
