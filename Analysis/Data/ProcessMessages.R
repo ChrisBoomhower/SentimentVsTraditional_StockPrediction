@@ -292,6 +292,8 @@ AAPL <- merge(AAPL.ST.small, AAPL.T.small, by = c("date", "hour"))
 AAPL <- merge(AAPL, AAPL.YF.small, by = c("date", "hour"))
 AAPL <- AAPL[with(AAPL, order(date, hour)),]
 
+saveRDS(AAPL, 'Data/TickerRDS/AAPL.RDS')
+
 #fill <- seq(ymd_h(paste(AAPL[1, "date"], AAPL[1, "hour"]), tz = "EST"),
 #    ymd_h(paste(AAPL[nrow(AAPL)-1, "date"], AAPL[nrow(AAPL)-1, "hour"]),tz = "EST"),
 #    by="hour")
