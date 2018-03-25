@@ -5,6 +5,10 @@
 ##                  prepares data for modeling, and then performs
 ##                  various modeling algorithms.
 
+## Housekeeping tasks
+rm(list = ls())
+gc()
+
 require(randomForest)
 require(xgboost)
 require(caret)
@@ -18,71 +22,104 @@ setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPre
 
 ########################################
 ###### Combine Price & Sentiment #######
+###### Set Aside Data for Prediction ###
+###### Check for Data Stationarity #####
 ########################################
 
-## Get hourly data and extract date and hour
-AAPL.stock <- read.csv("Data/Hourly Stock Data/getHistory_AAPL.csv", stringsAsFactors = FALSE)
-AAPL.stock$timestamp <- ymd_hms(strptime(AAPL.stock$timestamp,"%FT%H:%M:%S", tz = "EST"), tz = "EST")
-AAPL.stock$date <- date(AAPL.stock$timestamp)
-AAPL.stock$hour <- hour(AAPL.stock$timestamp)
-AAPL.stock$high.diff <- c(NA,diff(AAPL.stock$high))
+getTrainTest <- function(tick){
+    ########################################
+    ###### Combine Price & Sentiment #######
+    ########################################
+    sink(paste0("getTrainTest_", tick, ".txt"))
+    
+    ## Get hourly data and extract date and hour
+    stock <- read.csv(paste0("Data/Hourly Stock Data/getHistory_", tick, ".csv"), stringsAsFactors = FALSE)
+    stock$timestamp <- ymd_hms(strptime(stock$timestamp,"%FT%H:%M:%S", tz = "EST"), tz = "EST")
+    stock$date <- date(stock$timestamp)
+    stock$hour <- hour(stock$timestamp)
+    stock$high.diff <- c(NA,diff(stock$high))
+    
+    ## Merge sentiment data with stock data for model development
+    tickSent <- readRDS(paste0('Data/TickerRDS/', tick, '.RDS'))
+    tickSent.train <- merge(tickSent, stock[, c("date", "hour", "high")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
+    tickSent.train <- tickSent.train[tickSent.train$date > "2018-02-26" & tickSent.train$date < "2018-03-14",] #Incomplete sentiment data before 2-23-18
+    tickSent.train[is.na(tickSent.train)] <- 0 #Fill any NA sentiment scores with 0
+    colnames(tickSent.train) <- gsub(x = colnames(tickSent.train), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
+    
+    cat("\nTrain Head\n")
+    print(head(tickSent.train[,c(1,2,3,201)],21))
+    cat("\nTrain Tail\n")
+    print(tail(tickSent.train[,c(1,2,3,201)],21))
+    
+    cat("\nglimpse Train\n")
+    print(glimpse(tickSent.train))
+    
+    #############################################
+    ###### Set Aside Data for Prediction ########
+    #############################################
+    
+    ## Merge sentiment data with stock data for model prediction
+    tickSent.pred <- merge(tickSent, stock[, c("date", "hour", "high")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
+    tickSent.pred <- tickSent.pred[tickSent.pred$date > "2018-03-13",] #Incomplete sentiment data before 2-23-18
+    tickSent.pred[is.na(tickSent.pred)] <- 0 #Fill any NA sentiment scores with 0
+    colnames(tickSent.pred) <- gsub(x = colnames(tickSent.pred), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
+    
+    cat("\nTest Head\n")
+    print(head(tickSent.pred[,c(1,2,3,201)],21))
+    cat("\nTest Tail\n")
+    print(tail(tickSent.pred[,c(1,2,3,201)],21))
+    
+    print(cat("\nglimpse Test\n"))
+    glimpse(tickSent.pred)
+    
+    ##########################################
+    ###### Check for Data Stationarity #######
+    ##########################################
+    pdf(paste0(tick,'_Stationarity.pdf'))
+    ## Check stationarity of variables in model
+    temp <- apply(rbind(tickSent.train[2:length(tickSent.train)],tickSent.pred[2:length(tickSent.pred)]), 2, adf.test, alternative = "stationary", k=0)
+    plot(sapply(temp, function(x) x$p.value), xlab = "Column Location", ylab = "Dickey-Fuller p.value", main = "Dickey-Fuller p.values") #Note that while sentiment values are stationary, stock price is not
+    
+    temp <- apply(rbind(tickSent.train[2:length(tickSent.train)],tickSent.pred[2:length(tickSent.pred)]), 2, adf.test, alternative = "stationary")
+    plot(sapply(temp, function(x) x$p.value), xlab = "Column Location", ylab = "Augmented Dickey-Fuller p.value", main = "Augmented Dickey-Fuller p.values") #Note that while sentiment values are stationary, stock price is not
+    
+    ## Create high.diff training set
+    tickSent.diff.train <- merge(tickSent, stock[, c("date", "hour", "high.diff")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
+    tickSent.diff.train <- tickSent.diff.train[tickSent.diff.train$date > "2018-02-26" & tickSent.diff.train$date < "2018-03-14",] #Incomplete sentiment data before 2-23-18
+    tickSent.diff.train[is.na(tickSent.diff.train)] <- 0 #Fill any NA sentiment scores with 0
+    colnames(tickSent.diff.train) <- gsub(x = colnames(tickSent.diff.train), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
+    
+    cat("\nSanity check for matching Train df size\n")
+    print(nrow(tickSent.train) == nrow(tickSent.diff.train)) #Sanity check on size
+    
+    ## Create high.diff test set
+    tickSent.diff.pred <- merge(tickSent, stock[, c("date", "hour", "high")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
+    tickSent.diff.pred <- tickSent.diff.pred[tickSent.diff.pred$date > "2018-03-13",] #Incomplete sentiment data before 2-23-18
+    tickSent.diff.pred[is.na(tickSent.diff.pred)] <- 0 #Fill any NA sentiment scores with 0
+    colnames(tickSent.diff.pred) <- gsub(x = colnames(tickSent.diff.pred), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
+    
+    cat("\nSanity check for matching Test df size\n")
+    print(nrow(tickSent.pred) == nrow(tickSent.diff.pred)) #Sanity check on size
+    
+    #sum(!(cumsum(c(AAPL.stock$high[1], diff(AAPL.stock$high))) == AAPL.stock$high)) #Checking to see how to compare models when using differenced price
+    dev.off()
+    
+    sink() #Stop writing to text file for later review
+    
+    return(list(tickSent.train, tickSent.pred, tickSent.diff.train, tickSent.diff.pred))
+}
 
-## Merge sentiment data with stock data for model development
-AAPL.train <- merge(AAPL, AAPL.stock[, c("date", "hour", "high")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
-AAPL.train <- AAPL.train[AAPL.train$date > "2018-02-26" & AAPL.train$date < "2018-03-14",] #Incomplete sentiment data before 2-23-18
-AAPL.train[is.na(AAPL.train)] <- 0 #Fill any NA sentiment scores with 0
-colnames(AAPL.train) <- gsub(x = colnames(AAPL.train), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
-
-head(AAPL.train[,c(1,2,3,201)],21)
-tail(AAPL.train[,c(1,2,3,201)],21)
-
-glimpse(AAPL.train)
-
-#############################################
-###### Set Aside Data for Prediction ########
-#############################################
-
-## Merge sentiment data with stock data for model prediction
-AAPL.pred <- merge(AAPL, AAPL.stock[, c("date", "hour", "high")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
-AAPL.pred <- AAPL.pred[AAPL.pred$date > "2018-03-13",] #Incomplete sentiment data before 2-23-18
-AAPL.pred[is.na(AAPL.pred)] <- 0 #Fill any NA sentiment scores with 0
-colnames(AAPL.pred) <- gsub(x = colnames(AAPL.pred), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
-
-head(AAPL.pred[,c(1,2,3,201)],21)
-tail(AAPL.pred[,c(1,2,3,201)],21)
-
-glimpse(AAPL.pred)
-
-##########################################
-###### Check for Data Stationarity #######
-##########################################
-
-## Check stationarity of variables in model
-temp <- apply(rbind(AAPL.train[2:length(AAPL.train)],AAPL.pred[2:length(AAPL.pred)]), 2, adf.test, alternative = "stationary", k=0)
-plot(sapply(temp, function(x) x$p.value), xlab = "Column Location", ylab = "Dickey-Fuller p.value", main = "Dickey-Fuller p.values") #Note that while sentiment values are stationary, stock price is not
-
-temp <- apply(rbind(AAPL.train[2:length(AAPL.train)],AAPL.pred[2:length(AAPL.pred)]), 2, adf.test, alternative = "stationary")
-plot(sapply(temp, function(x) x$p.value), xlab = "Column Location", ylab = "Augmented Dickey-Fuller p.value", main = "Augmented Dickey-Fuller p.values") #Note that while sentiment values are stationary, stock price is not
-
-## Create high.diff training set
-AAPL.diff.train <- merge(AAPL, AAPL.stock[, c("date", "hour", "high.diff")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
-AAPL.diff.train <- AAPL.diff.train[AAPL.diff.train$date > "2018-02-26" & AAPL.diff.train$date < "2018-03-14",] #Incomplete sentiment data before 2-23-18
-AAPL.diff.train[is.na(AAPL.diff.train)] <- 0 #Fill any NA sentiment scores with 0
-colnames(AAPL.diff.train) <- gsub(x = colnames(AAPL.diff.train), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
-
-nrow(AAPL.train) == nrow(AAPL.diff.train) #Sanity check on size
-
-## Create high.diff test set
-AAPL.diff.pred <- merge(AAPL, AAPL.stock[, c("date", "hour", "high")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
-AAPL.diff.pred <- AAPL.diff.pred[AAPL.diff.pred$date > "2018-03-13",] #Incomplete sentiment data before 2-23-18
-AAPL.diff.pred[is.na(AAPL.diff.pred)] <- 0 #Fill any NA sentiment scores with 0
-colnames(AAPL.diff.pred) <- gsub(x = colnames(AAPL.diff.pred), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
-
-nrow(AAPL.pred) == nrow(AAPL.diff.pred) #Sanity check on size
-
-sum(!(cumsum(c(AAPL.stock$high[1], diff(AAPL.stock$high))) == AAPL.stock$high)) #Checking to see how to compare models when using differenced price
-
-
+AAPL <- getTrainTest("AAPL")
+AMZN <- getTrainTest("AMZN")
+BA   <- getTrainTest("BA")
+DWDP <- getTrainTest("DWDP")
+JNJ  <- getTrainTest("JNJ")
+JPM  <- getTrainTest("JPM")
+NEE  <- getTrainTest("NEE")
+PG   <- getTrainTest("PG")
+SPG  <- getTrainTest("SPG")
+VZ   <- getTrainTest("VZ")
+XOM  <- getTrainTest("XOM")
 
 ###########################################
 ###### Generate Random Forest Model #######

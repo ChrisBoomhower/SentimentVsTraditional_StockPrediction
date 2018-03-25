@@ -239,172 +239,74 @@ print(Sys.time() - start)
 ####### Combine Ticker Sources #######
 ######################################
 
-## Prep for hourly predictions
-AAPL.ST.small <- as.data.frame(AAPL.ST[,c("created_at", "score")])
-colnames(AAPL.ST.small) <- c("timestamp", "ST.score")
-AAPL.ST.small$timestamp <- as.character(format(AAPL.ST.small$timestamp, tz="EST"))
-AAPL.ST.small$timestamp <- ymd_hms(AAPL.ST.small$timestamp, tz="EST")
-AAPL.ST.small$date <- date(AAPL.ST.small$timestamp) #date/hour extraction inspired by https://stackoverflow.com/questions/10705328/extract-hours-and-seconds-from-posixct-for-plotting-purposes-in-r
-AAPL.ST.small$hour <- hour(AAPL.ST.small$timestamp)
-AAPL.ST.small <- aggregate(ST.score~date+hour, AAPL.ST.small, sum)
-AAPL.ST.small <- AAPL.ST.small[with(AAPL.ST.small, order(date, hour)),]
-fill <- seq(ymd_h(paste(AAPL.ST.small[1, "date"], AAPL.ST.small[1, "hour"]), tz = "EST"),
-            ymd_h(paste(AAPL.ST.small[nrow(AAPL.ST.small)-1, "date"], AAPL.ST.small[nrow(AAPL.ST.small)-1, "hour"]),tz = "EST"),
-            by="hour")
-AAPL.ST.small <- full_join(AAPL.ST.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
-for(i in seq(1,72)) AAPL.ST.small <- slide(AAPL.ST.small, Var = "ST.score", slideBy = -i)
-AAPL.ST.small <- tail(AAPL.ST.small, -72) #Drop rows with lagged NA values
-AAPL.ST.small <- AAPL.ST.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
+## Function to combine sources and pad missing timestamps when no messages were posted
+combineSent <- function(ST.t, Tw.t, YF.t){
+    ## Prep for hourly predictions
+    ST.small <- as.data.frame(get(ST.t)[,c("created_at", "score")])
+    colnames(ST.small) <- c("timestamp", "ST.score")
+    ST.small$timestamp <- as.character(format(ST.small$timestamp, tz="EST"))
+    ST.small$timestamp <- ymd_hms(ST.small$timestamp, tz="EST")
+    ST.small$date <- date(ST.small$timestamp) #date/hour extraction inspired by https://stackoverflow.com/questions/10705328/extract-hours-and-seconds-from-posixct-for-plotting-purposes-in-r
+    ST.small$hour <- hour(ST.small$timestamp)
+    ST.small <- aggregate(ST.score~date+hour, ST.small, sum)
+    ST.small <- ST.small[with(ST.small, order(date, hour)),]
+    fill <- seq(ymd_h(paste(ST.small[1, "date"], ST.small[1, "hour"]), tz = "EST"),
+                ymd_h(paste(ST.small[nrow(ST.small)-1, "date"], ST.small[nrow(ST.small)-1, "hour"]),tz = "EST"),
+                by="hour")
+    ST.small <- full_join(ST.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
+    for(i in seq(1,72)) ST.small <- slide(ST.small, Var = "ST.score", slideBy = -i)
+    ST.small <- tail(ST.small, -72) #Drop rows with lagged NA values
+    ST.small <- ST.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
+    
+    T.small <- as.data.frame(get(Tw.t)[,c("created", "score")])
+    colnames(T.small) <- c("timestamp", "T.score")
+    T.small$timestamp <- as.character(format(T.small$timestamp, tz="EST"))
+    T.small$timestamp <- ymd_hms(T.small$timestamp, tz="EST")
+    T.small$date <- date(T.small$timestamp)
+    T.small$hour <- hour(T.small$timestamp)
+    T.small <- aggregate(T.score~date+hour, T.small, sum)
+    T.small <- T.small[with(T.small, order(date, hour)),]
+    fill <- seq(ymd_h(paste(T.small[1, "date"], T.small[1, "hour"]), tz = "EST"),
+                ymd_h(paste(T.small[nrow(T.small)-1, "date"], T.small[nrow(T.small)-1, "hour"]),tz = "EST"),
+                by="hour")
+    T.small <- full_join(T.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
+    for(i in seq(1,72)) T.small <- slide(T.small, Var = "T.score", slideBy = -i)
+    T.small <- tail(T.small, -72) #Drop rows with lagged NA values
+    T.small <- T.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
+    
+    YF.small <- as.data.frame(get(YF.t)[,c("timestamp", "score")])
+    colnames(YF.small) <- c("timestamp", "YF.score")
+    YF.small$timestamp <- as.character(format(YF.small$timestamp, tz="EST"))
+    YF.small$timestamp <- ymd_hms(YF.small$timestamp, tz="EST")
+    YF.small$date <- date(YF.small$timestamp)
+    YF.small$hour <- hour(YF.small$timestamp)
+    YF.small <- aggregate(YF.score~date+hour, YF.small, sum)
+    YF.small <- YF.small[with(YF.small, order(date, hour)),]
+    fill <- seq(ymd_h(paste(YF.small[1, "date"], YF.small[1, "hour"]), tz = "EST"),
+                ymd_h(paste(YF.small[nrow(YF.small)-1, "date"], YF.small[nrow(YF.small)-1, "hour"]),tz = "EST"),
+                by="hour")
+    YF.small <- full_join(YF.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
+    for(i in seq(1,72)) YF.small <- slide(YF.small, Var = "YF.score", slideBy = -i)
+    YF.small <- tail(YF.small, -72) #Drop rows with lagged NA values
+    YF.small <- YF.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
+    
+    sent.df <- merge(ST.small, T.small, by = c("date", "hour"))
+    sent.df <- merge(sent.df, YF.small, by = c("date", "hour"))
+    sent.df <- sent.df[with(sent.df, order(date, hour)),]
+    
+    return(sent.df)
+}
 
-AAPL.T.small <- as.data.frame(AAPL.T[,c("created", "score")])
-colnames(AAPL.T.small) <- c("timestamp", "T.score")
-AAPL.T.small$timestamp <- as.character(format(AAPL.T.small$timestamp, tz="EST"))
-AAPL.T.small$timestamp <- ymd_hms(AAPL.T.small$timestamp, tz="EST")
-AAPL.T.small$date <- date(AAPL.T.small$timestamp)
-AAPL.T.small$hour <- hour(AAPL.T.small$timestamp)
-AAPL.T.small <- aggregate(T.score~date+hour, AAPL.T.small, sum)
-AAPL.T.small <- AAPL.T.small[with(AAPL.T.small, order(date, hour)),]
-fill <- seq(ymd_h(paste(AAPL.T.small[1, "date"], AAPL.T.small[1, "hour"]), tz = "EST"),
-            ymd_h(paste(AAPL.T.small[nrow(AAPL.T.small)-1, "date"], AAPL.T.small[nrow(AAPL.T.small)-1, "hour"]),tz = "EST"),
-            by="hour")
-AAPL.T.small <- full_join(AAPL.T.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
-for(i in seq(1,72)) AAPL.T.small <- slide(AAPL.T.small, Var = "T.score", slideBy = -i)
-AAPL.T.small <- tail(AAPL.T.small, -72) #Drop rows with lagged NA values
-AAPL.T.small <- AAPL.T.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
+## Create list of sources for each ticker
+listCombo <- list()
+for(i in 1:length(ST)){
+    listCombo[[i]] <- c(ST[i], Tw[i], YF[i])
+}
 
-AAPL.YF.small <- as.data.frame(AAPL.YF[,c("timestamp", "score")])
-colnames(AAPL.YF.small) <- c("timestamp", "YF.score")
-AAPL.YF.small$timestamp <- as.character(format(AAPL.YF.small$timestamp, tz="EST"))
-AAPL.YF.small$timestamp <- ymd_hms(AAPL.YF.small$timestamp, tz="EST")
-AAPL.YF.small$date <- date(AAPL.YF.small$timestamp)
-AAPL.YF.small$hour <- hour(AAPL.YF.small$timestamp)
-AAPL.YF.small <- aggregate(YF.score~date+hour, AAPL.YF.small, sum)
-AAPL.YF.small <- AAPL.YF.small[with(AAPL.YF.small, order(date, hour)),]
-fill <- seq(ymd_h(paste(AAPL.YF.small[1, "date"], AAPL.YF.small[1, "hour"]), tz = "EST"),
-            ymd_h(paste(AAPL.YF.small[nrow(AAPL.YF.small)-1, "date"], AAPL.YF.small[nrow(AAPL.YF.small)-1, "hour"]),tz = "EST"),
-            by="hour")
-AAPL.YF.small <- full_join(AAPL.YF.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
-for(i in seq(1,72)) AAPL.YF.small <- slide(AAPL.YF.small, Var = "YF.score", slideBy = -i)
-AAPL.YF.small <- tail(AAPL.YF.small, -72) #Drop rows with lagged NA values
-AAPL.YF.small <- AAPL.YF.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
-
-AAPL <- merge(AAPL.ST.small, AAPL.T.small, by = c("date", "hour"))
-AAPL <- merge(AAPL, AAPL.YF.small, by = c("date", "hour"))
-AAPL <- AAPL[with(AAPL, order(date, hour)),]
-
-saveRDS(AAPL, 'Data/TickerRDS/AAPL.RDS')
-
-#fill <- seq(ymd_h(paste(AAPL[1, "date"], AAPL[1, "hour"]), tz = "EST"),
-#    ymd_h(paste(AAPL[nrow(AAPL)-1, "date"], AAPL[nrow(AAPL)-1, "hour"]),tz = "EST"),
-#    by="hour")
-#AAPL <- full_join(AAPL, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
-#AAPL <- tail(AAPL, -72) #Drop rows with lagged NA values
-
-## Prep for day-to-day predictions
-
-# AAPL.ST.small <- as.data.frame(AAPL.ST[,c("created_at", "score")])
-# colnames(AAPL.ST.small) <- c("timestamp", "ST.score")
-# AAPL.ST.small$timestamp <- as.Date(format(AAPL.ST.small$timestamp, tz="EST"))
-# AAPL.ST.small <- aggregate(ST.score~timestamp, AAPL.ST.small, sum)
-# AAPL.ST.small <- slide(AAPL.ST.small, Var = "ST.score", slideBy = -1)
-# AAPL.ST.small <- slide(AAPL.ST.small, Var = "ST.score", slideBy = -2)
-# AAPL.ST.small <- slide(AAPL.ST.small, Var = "ST.score", slideBy = -3)
-# 
-# AAPL.T.small <- AAPL.T[,c("created", "score")]
-# colnames(AAPL.T.small) <- c("timestamp", "T.score")
-# AAPL.T.small$timestamp <- as.Date(format(AAPL.T.small$timestamp, tz="EST"))
-# AAPL.T.small <- aggregate(T.score~timestamp, AAPL.T.small, sum)
-# AAPL.T.small <- slide(AAPL.T.small, Var = "T.score", slideBy = -1)
-# AAPL.T.small <- slide(AAPL.T.small, Var = "T.score", slideBy = -2)
-# AAPL.T.small <- slide(AAPL.T.small, Var = "T.score", slideBy = -3)
-# 
-# AAPL.YF.small <- AAPL.YF[,c("timestamp", "score")]
-# colnames(AAPL.YF.small) <- c("timestamp", "YF.score")
-# AAPL.YF.small$timestamp <- as.Date(format(AAPL.YF.small$timestamp, tz="EST"))
-# AAPL.YF.small <- aggregate(YF.score~timestamp, AAPL.YF.small, sum)
-# AAPL.YF.small <- slide(AAPL.YF.small, Var = "YF.score", slideBy = -1)
-# AAPL.YF.small <- slide(AAPL.YF.small, Var = "YF.score", slideBy = -2)
-# AAPL.YF.small <- slide(AAPL.YF.small, Var = "YF.score", slideBy = -3)
-# 
-# AAPL <- merge(AAPL.ST.small, AAPL.T.small, by = "timestamp")
-# AAPL <- merge(AAPL, AAPL.YF.small, by = "timestamp")
-
-
-
-# AMZN.ST.small <- AMZN.ST[,c("created_at", "score")]
-# colnames(AMZN.ST.small) <- c("timestamp", "score")
-# AMZN.T.small <- AMZN.T[,c("created", "score")]
-# colnames(AMZN.T.small) <- c("timestamp", "score")
-# AMZN.YF.small <- AMZN.YF[,c("timestamp", "score")]
-# AMZN <- as.data.frame(rbind(AMZN.ST.small,AMZN.T.small,AMZN.YF.small))
-# 
-# BA.ST.small <- BA.ST[,c("created_at", "score")]
-# colnames(BA.ST.small) <- c("timestamp", "score")
-# Boeing.T.small <- Boeing.T[,c("created", "score")]
-# colnames(Boeing.T.small) <- c("timestamp", "score")
-# BA.YF.small <- BA.YF[,c("timestamp", "score")]
-# BA <- as.data.frame(rbind(BA.ST.small,Boeing.T.small,BA.YF.small))
-# 
-# DWDP.ST.small <- DWDP.ST[,c("created_at", "score")]
-# colnames(DWDP.ST.small) <- c("timestamp", "score")
-# DowDuPont.T.small <- DowDuPont.T[,c("created", "score")]
-# colnames(DowDuPont.T.small) <- c("timestamp", "score")
-# DWDP.YF.small <- DWDP.YF[,c("timestamp", "score")]
-# DWDP <- as.data.frame(rbind(DWDP.ST.small,DowDuPont.T.small,DWDP.YF.small))
-# 
-# JNJ.ST.small <- JNJ.ST[,c("created_at", "score")]
-# colnames(JNJ.ST.small) <- c("timestamp", "score")
-# JNJ.T.small <- JNJ.T[,c("created", "score")]
-# colnames(JNJ.T.small) <- c("timestamp", "score")
-# JNJ.YF.small <- JNJ.YF[,c("timestamp", "score")]
-# JNJ <- as.data.frame(rbind(JNJ.ST.small,JNJ.T.small,JNJ.YF.small))
-# 
-# JPM.ST.small <- JPM.ST[,c("created_at", "score")]
-# colnames(JPM.ST.small) <- c("timestamp", "score")
-# JPM.T.small <- JPM.T[,c("created", "score")]
-# colnames(JPM.T.small) <- c("timestamp", "score")
-# JPM.YF.small <- JPM.YF[,c("timestamp", "score")]
-# JPM <- as.data.frame(rbind(JPM.ST.small,JPM.T.small,JPM.YF.small))
-# 
-# NEE.ST.small <- NEE.ST[,c("created_at", "score")]
-# colnames(NEE.ST.small) <- c("timestamp", "score")
-# NEE.T.small <- NEE.T[,c("created", "score")]
-# colnames(NEE.T.small) <- c("timestamp", "score")
-# NEE.YF.small <- NEE.YF[,c("timestamp", "score")]
-# NEE <- as.data.frame(rbind(NEE.ST.small,NEE.T.small,NEE.YF.small))
-# 
-# PG.ST.small <- PG.ST[,c("created_at", "score")]
-# colnames(PG.ST.small) <- c("timestamp", "score")
-# Proctor&Gamble.T.small <- Proctor&Gamble.T[,c("created", "score")]
-# colnames(Proctor&Gamble.T.small) <- c("timestamp", "score")
-# PG.YF.small <- PG.YF[,c("timestamp", "score")]
-# PG <- as.data.frame(rbind(PG.ST.small,Proctor&Gamble.T.small,PG.YF.small))
-# 
-# SPG.ST.small <- SPG.ST[,c("created_at", "score")]
-# colnames(SPG.ST.small) <- c("timestamp", "score")
-# SPG.T.small <- SPG.T[,c("created", "score")]
-# colnames(SPG.T.small) <- c("timestamp", "score")
-# SPG.YF.small <- SPG.YF[,c("timestamp", "score")]
-# SPG <- as.data.frame(rbind(SPG.ST.small,SPG.T.small,SPG.YF.small))
-# 
-# VZ.ST.small <- VZ.ST[,c("created_at", "score")]
-# colnames(VZ.ST.small) <- c("timestamp", "score")
-# Verizon.T.small <- Verizon.T[,c("created", "score")]
-# colnames(Verizon.T.small) <- c("timestamp", "score")
-# VZ.YF.small <- VZ.YF[,c("timestamp", "score")]
-# VZ <- as.data.frame(rbind(VZ.ST.small,Verizon.T.small,VZ.YF.small))
-# 
-# XOM.ST.small <- XOM.ST[,c("created_at", "score")]
-# colnames(XOM.ST.small) <- c("timestamp", "score")
-# Exxon.T.small <- Exxon.T[,c("created", "score")]
-# colnames(Exxon.T.small) <- c("timestamp", "score")
-# XOM.YF.small <- XOM.YF[,c("timestamp", "score")]
-# XOM <- as.data.frame(rbind(XOM.ST.small,Exxon.T.small,XOM.YF.small))
-
-## Cleanup unneeded objects
-rm(list=ls(pattern = '.\\.scores$'))
-rm(cols.u, files, s, ST.tickers, start, T.tickers, YF.tickers)
-gc()
+## Save combined data for each ticker to RDS file
+for(i in 1:length(listCombo)){
+    saveRDS(combineSent(listCombo[[i]][1], listCombo[[i]][2], listCombo[[i]][3]), paste0('Data/TickerRDS/', strsplit(ST[i], "\\.")[[1]][1],'.RDS'))
+}
 
 ######################################
 ####### GET WORDS FOR TABLEAUE #######
