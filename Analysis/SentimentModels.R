@@ -550,23 +550,67 @@ print(Sys.time() - startOverall)
 ######### Compare Sentiment Models ########
 ###########################################
 
-modelList <- ls(pattern = '.\\..')
-modelInfo <- data.frame(model.name = character(), r2.train = numeric(), r2.pred = numeric(), mse.train = numeric(), mse.pred = numeric(), rmse.train = numeric(), rmse.pred = numeric(), mae.train = numeric(), mae.pred = numeric(), mape.train = numeric(), mape.pred = numeric())
-for(m in modelList){
-    modelInfo <- rbind(modelInfo, data.frame(m,
-                                             r2.train = get(m)[[2]][[1]], r2.pred = get(m)[[2]][[2]],
-                                             mse.train = get(m)[[3]][[1]], mse.pred = get(m)[[3]][[2]],
-                                             rmse.train = get(m)[[4]][[1]], rmse.pred = get(m)[[4]][[2]],
-                                             mae.train = get(m)[[5]][[1]], mae.pred = get(m)[[5]][[2]],
-                                             mape.train = get(m)[[6]][[1]], mape.pred = get(m)[[6]][[2]]))
+## Compare models for each ticker graphically
+compareMods <- function(pat){
+    pdf(paste0('Comparison_', pat, '.pdf'))
+    
+    ## Get resample results for each model
+    modList <- ls(pattern = paste0(pat,"."), envir=.GlobalEnv)
+    comp <- lapply(modList, function(x) get(x)[[1]])
+    names(comp) <- modList
+    comp <- resamples(comp)
+    
+    ## Compare metrics of resample results
+    trellis.par.set(caretTheme())
+    print(dotplot(comp, metric = "Rsquared", main = "Sentiment Model Review - R^2"))
+    print(dotplot(comp, metric = "RMSE", main = "Sentiment Model Review - RMSE"))
+    print(dotplot(comp, metric = "MAE", main = "Sentiment Model Review - MAE"))
+    
+    ## Compare and rank overall metrics
+    modInfo <- data.frame(model.name = character(), ticker = character(), r2.train = numeric(), r2.pred = numeric(), mse.train = numeric(), mse.pred = numeric(), rmse.train = numeric(), rmse.pred = numeric(), mae.train = numeric(), mae.pred = numeric(), mape.train = numeric(), mape.pred = numeric())
+    for(m in modList){
+        modInfo  <-  rbind(modInfo, data.frame(model.name = m, ticker = strsplit(m, '\\.|d')[[1]][1],
+                                                 r2.train = get(m)[[2]][[1]], r2.pred = get(m)[[2]][[2]],
+                                                 mse.train = get(m)[[3]][[1]], mse.pred = get(m)[[3]][[2]],
+                                                 rmse.train = get(m)[[4]][[1]], rmse.pred = get(m)[[4]][[2]],
+                                                 mae.train = get(m)[[5]][[1]], mae.pred = get(m)[[5]][[2]],
+                                                 mape.train = get(m)[[6]][[1]], mape.pred = get(m)[[6]][[2]]))
+    }
+    
+    model.name <- modInfo$model.name
+    ticker <- modInfo$ticker
+    r2.train <- rank(-modInfo$r2.train, ties.method = "average")
+    r2.pred <- NA #NA chosen since prediction rSquared values are wonky
+    mse.train <- rank(modInfo$mse.train, ties.method = "average")
+    mse.pred <- rank(modInfo$mse.pred, ties.method = "average")
+    rmse.train <- rank(modInfo$rmse.train, ties.method = "average")
+    rmse.pred <- rank(modInfo$rmse.pred, ties.method = "average")
+    mae.train <- rank(modInfo$mae.train, ties.method = "average")
+    mae.pred <- rank(modInfo$mae.pred, ties.method = "average")
+    mape.train <- rank(modInfo$mape.train, ties.method = "average")
+    mape.pred <- rank(modInfo$mape.pred, ties.method = "average")
+    
+    ## Make final rankings
+    modRanks <- data.frame(model.name, ticker, r2.train, r2.pred, mse.train, mse.pred, rmse.train, rmse.pred, mae.train, mae.pred, mape.train, mape.pred)
+    modRanks$rank <- rank(rowSums(modRanks[,3:length(modRanks)], na.rm = TRUE))
+    
+    ## Write to global variables
+    assign(paste0('Comparison.', pat), modInfo, envir=.GlobalEnv)
+    assign(paste0('Ranks.', pat), modRanks, envir=.GlobalEnv)
+    
+    dev.off()
+    
+    return(comp)
 }
 
-View(modelInfo)
-
-resamps <- resamples(list(RandomForest = rf, XGBoost = xgbmod, LinearRegression = lm.mod))
-summary(resamps)
-trellis.par.set(caretTheme())
-dotplot(resamps, metric = "Rsquared", main = "Sentiment Model Review - R^2")
-dotplot(resamps, metric = "RMSE", main = "Sentiment Model Review - RMSE")
-dotplot(resamps, metric = "MAE", main = "Sentiment Model Review - MAE")
-
+compareMods('AAPL')
+compareMods('AMZN')
+compareMods('BA')
+compareMods('DWDP')
+compareMods('JNJ')
+compareMods('JPM')
+compareMods('NEE')
+compareMods('PG')
+compareMods('SPG')
+compareMods('VZ')
+compareMods('XOM')
