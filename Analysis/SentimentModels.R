@@ -109,9 +109,8 @@ getTrainTest <- function(tick){
     
     #sum(!(cumsum(c(AAPL.stock$high[1], diff(AAPL.stock$high))) == AAPL.stock$high)) #Checking to see how to compare models when using differenced price
     
-    dev.off()
-    
-    sink() #Stop writing to text file for later review
+    on.exit(dev.off())
+    on.exit(sink(), add = TRUE) #Stop writing to text file for later review
     
     return(list(tickSent.train, tickSent.pred, tickSent.diff.train, tickSent.diff.pred))
 }
@@ -132,98 +131,104 @@ XOM  <- getTrainTest("XOM")
 ###### Generate Random Forest Model #######
 ###########################################
 doRF <- function(train.df, pred.df, tick, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
-    ## Write outputs to external files for later review
-    sink(paste0("doRF_", tick, xform, "_", metric, ".txt"))
-    pdf(paste0('RFplots_',tick, xform, '_', metric, '.pdf'))
-    
-    ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
-    ## Setup data
-    cols <- colnames(train.df)
-    cols <- cols[!cols %in% "date"]
-    
-    ## Create Random Forest Seeds
-    # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
-    set.seed(123)
-    seeds <- vector(mode = "list", length = 44) #Length based on number of resamples + 1 for final model iteration
-    for(i in 1:43) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
-    seeds[[44]] <- sample.int(1000, 1)
-    
-    ## Setup training parameters
-    ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #35 day cv training, 14 day cv testing
-    tuneGridRF <- expand.grid(.mtry=c(1:72))
-    #metric <- "Rsquared"
-    
-    ## Perform training
-    start <- Sys.time() #Start timer
-    rf <- train(high ~ ., data = train.df[,cols], method = "rf", metric = metric, trControl = ts.control, tuneGrid = tuneGridRF, importance=TRUE)
-    print(Sys.time() - start)
-    #tuneGridRF <- expand.grid(.mtry=22)
-    #rf <- train(high ~ ., data = train.df[,cols], method = "rf", metric = metric, trControl = ts.control, tuneGrid = tuneGridRF, importance=TRUE) #AAPL best mtry = 22
-    cat("\nRF Output\n")
-    print(rf)
-    print(plot(rf))
-    
-    ## Evaluate metrics
-    r2.train <- rSquared(train.df$high, train.df$high - predict(rf, train.df[,cols]))
-    r2.pred <- rSquared(pred.df$high, pred.df$high - predict(rf, pred.df[,cols]))
-    mse.train <- mean((train.df$high - predict(rf, train.df[,cols]))^2)
-    mse.pred <- mean((pred.df$high - predict(rf, pred.df[,cols]))^2)
-    rmse.train <- sqrt(mse.train)
-    rmse.pred <- sqrt(mse.pred)
-    mae.train <- mean(abs(train.df$high - predict(rf, train.df[,cols])))
-    mae.pred <- mean(abs(pred.df$high - predict(rf, pred.df[,cols])))
-    mape.train <- MAPE(train.df$high, predict(rf, train.df[,cols]))
-    mape.pred <- MAPE(pred.df$high, predict(rf, pred.df[,cols]))
-    
-    ## Plot Rsquared Evaluation
-    p <- ggplot(aes(x=actual, y=pred),
-                data=data.frame(actual=train.df$high, pred=predict(rf, train.df[,cols])))
-    print(p + geom_point() +
-        geom_abline(color="red") +
-        ggtitle(paste(tick, "RandomForest Regression: Training r^2 =", r2.train)))
-    
-    p <- ggplot(aes(x=actual, y=pred),
-                data=data.frame(actual=pred.df$high, pred=predict(rf, pred.df[,cols])))
-    print(p + geom_point() +
-        geom_abline(color="red") +
-        ggtitle(paste(tick, "RandomForest Regression: Prediction r^2 =", r2.pred)))
-    
-    if(xform == "diff"){
-        ## Plot trained and predicted performance
-        plot(as.numeric(c(cumsum(c(orig.train.df$high[1], train.df$high)), cumsum(c(orig.pred.df$high[1], pred.df$high)))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", main = paste(tick, "RF Performance (Diff): Training + Prediction"))
-        axis(1, at=1:(sum(length(train.df$high), length(pred.df$high))), labels=FALSE)
-        text(1:(sum(length(train.df$high), length(pred.df$high))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-        lines(c(cumsum(c(orig.train.df$high[1], predict(rf, train.df[,cols]))), cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols])))), type = "l", lty = 2, lwd = 2, col = "red")
-        abline(v = length(train.df$high)+1, lty = 2, col = "blue")
+    tryCatch({
+        ## Write outputs to external files for later review
+        sink(paste0("doRF_", tick, xform, "_", metric, ".txt"))
+        pdf(paste0('RFplots_',tick, xform, '_', metric, '.pdf'))
         
-        ## Plot just predicted performance
-        plot(as.numeric(cumsum(c(orig.pred.df$high[1], pred.df$high))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df$high[1], pred.df$high)))), max(c(cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df$high[1], pred.df$high))))), main = paste(tick, "RF Performance (Diff): Prediction"))
-        axis(1, at=1:(length(pred.df$high)), labels=FALSE)
-        text(1:(length(pred.df$high)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-        lines(cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols]))), type = "l", lty = 2, lwd = 2, col = "red")
-    }
-    else{
-        ## Plot trained and predicted performance
-        plot(as.numeric(c(train.df$high, pred.df$high)), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", main = paste(tick, "RF Performance: Training + Prediction"))
-        axis(1, at=1:(sum(length(train.df$high), length(pred.df$high))), labels=FALSE)
-        text(1:(sum(length(train.df$high), length(pred.df$high))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-        lines(c(predict(rf, train.df[,cols]),predict(rf, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
-        abline(v = length(train.df$high)+1, lty = 2, col = "blue")
+        ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
+        ## Setup data
+        cols <- colnames(train.df)
+        cols <- cols[!cols %in% "date"]
         
-        ## Plot just predicted performance
-        plot(as.numeric(pred.df$high), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", ylim = c(min(c(predict(rf, pred.df[,cols]), pred.df$high)), max(c(predict(rf, pred.df[,cols]), pred.df$high))), main = paste(tick, "RF Performance: Prediction"))
-        axis(1, at=1:(length(pred.df$high)), labels=FALSE)
-        text(1:(length(pred.df$high)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-        lines(predict(rf, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
-    }
+        ## Create Random Forest Seeds
+        # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
+        set.seed(123)
+        seeds <- vector(mode = "list", length = 44) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:43) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
+        seeds[[44]] <- sample.int(1000, 1)
+        
+        ## Setup training parameters
+        ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #35 day cv training, 14 day cv testing
+        tuneGridRF <- expand.grid(.mtry=c(1:72))
+        #metric <- "Rsquared"
+        
+        ## Perform training
+        start <- Sys.time() #Start timer
+        rf <- train(high ~ ., data = train.df[,cols], method = "rf", metric = metric, trControl = ts.control, tuneGrid = tuneGridRF, importance=TRUE)
+        print(Sys.time() - start)
+        #tuneGridRF <- expand.grid(.mtry=22)
+        #rf <- train(high ~ ., data = train.df[,cols], method = "rf", metric = metric, trControl = ts.control, tuneGrid = tuneGridRF, importance=TRUE) #AAPL best mtry = 22
+        cat("\nRF Output\n")
+        print(rf)
+        print(plot(rf))
+        
+        ## Evaluate metrics
+        r2.train <- rSquared(train.df$high, train.df$high - predict(rf, train.df[,cols]))
+        r2.pred <- rSquared(pred.df$high, pred.df$high - predict(rf, pred.df[,cols]))
+        mse.train <- mean((train.df$high - predict(rf, train.df[,cols]))^2)
+        mse.pred <- mean((pred.df$high - predict(rf, pred.df[,cols]))^2)
+        rmse.train <- sqrt(mse.train)
+        rmse.pred <- sqrt(mse.pred)
+        mae.train <- mean(abs(train.df$high - predict(rf, train.df[,cols])))
+        mae.pred <- mean(abs(pred.df$high - predict(rf, pred.df[,cols])))
+        mape.train <- MAPE(train.df$high, predict(rf, train.df[,cols]))
+        mape.pred <- MAPE(pred.df$high, predict(rf, pred.df[,cols]))
+        
+        ## Plot Rsquared Evaluation
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=train.df$high, pred=predict(rf, train.df[,cols])))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, "RandomForest Regression: Training r^2 =", r2.train)))
+        
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=pred.df$high, pred=predict(rf, pred.df[,cols])))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, "RandomForest Regression: Prediction r^2 =", r2.pred)))
+        
+        if(xform == "diff"){
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(cumsum(c(orig.train.df$high[1], train.df$high)), cumsum(c(orig.pred.df$high[1], pred.df$high)))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", main = paste(tick, "RF Performance (Diff): Training + Prediction"))
+            axis(1, at=1:(sum(length(train.df$high), length(pred.df$high))), labels=FALSE)
+            text(1:(sum(length(train.df$high), length(pred.df$high))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(orig.train.df$high[1], predict(rf, train.df[,cols]))), cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols])))), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(train.df$high)+1, lty = 2, col = "blue")
+            
+            ## Plot just predicted performance
+            plot(as.numeric(cumsum(c(orig.pred.df$high[1], pred.df$high))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df$high[1], pred.df$high)))), max(c(cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df$high[1], pred.df$high))))), main = paste(tick, "RF Performance (Diff): Prediction"))
+            axis(1, at=1:(length(pred.df$high)), labels=FALSE)
+            text(1:(length(pred.df$high)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols]))), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        else{
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(train.df$high, pred.df$high)), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", main = paste(tick, "RF Performance: Training + Prediction"))
+            axis(1, at=1:(sum(length(train.df$high), length(pred.df$high))), labels=FALSE)
+            text(1:(sum(length(train.df$high), length(pred.df$high))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(predict(rf, train.df[,cols]),predict(rf, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(train.df$high)+1, lty = 2, col = "blue")
+            
+            ## Plot just predicted performance
+            plot(as.numeric(pred.df$high), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", ylim = c(min(c(predict(rf, pred.df[,cols]), pred.df$high)), max(c(predict(rf, pred.df[,cols]), pred.df$high))), main = paste(tick, "RF Performance: Prediction"))
+            axis(1, at=1:(length(pred.df$high)), labels=FALSE)
+            text(1:(length(pred.df$high)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(predict(rf, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        
+        ## Get feature importance
+        feat.imp <- varImp(rf)
+        plot(feat.imp, main = paste(tick, "RF Feature Importance"))
+        
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+    }, error = function(e){
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+        print(paste(tick, "RF failed"))
+    })
     
-    ## Get feature importance
-    feat.imp <- varImp(rf)
-    plot(feat.imp, main = paste(tick, "RF Feature Importance"))
-    
-    dev.off()
-    
-    sink()
     
     return(list(rf, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
 }
@@ -284,114 +289,124 @@ print(Sys.time() - startOverall)
 ######### Generate XG Boost Model #########
 ###########################################
 doXGB <- function(train.df, pred.df, tick, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
-    ## Write outputs to external files for later review
-    sink(paste0("doXGB_", tick, xform, "_", metric, ".txt"))
-    pdf(paste0('XGBplots_',tick, xform, '_', metric, '.pdf'))
-    
-    ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
-    ## Setup data
-    ## Setup data
-    cols <- colnames(train.df)
-    cols <- cols[!cols %in% c("date", "high")]
-    X.train <- data.matrix(train.df[,cols])
-    X.test <- data.matrix(pred.df[,cols])
-    Y.train <- train.df$high
-    Y.test <- pred.df$high
-    
-    ## Create seeds
-    set.seed(123)
-    seeds <- vector(mode = "list", length = 44) #Length based on number of resamples + 1 for final model iteration
-    for(i in 1:43) seeds[[i]] <- sample.int(1000, 12) #sample.int second argument value based on expand.grid nrows
-    seeds[[44]] <- sample.int(1000, 1)
-    
-    ## Setup training parameters
-    ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE, search = "grid") #35 day cv training, 14 day cv testing
-    metric <- "RMSE"
-    tuneGridXGB <- expand.grid( #See parameter descriptions at http://xgboost.readthedocs.io/en/latest/parameter.html
-        nrounds=350,
-        eta = c(0.3, 0.5),
-        gamma = c(0, 1, 5),
-        max_depth = 6,
-        colsample_bytree = c(0.5, 1),
-        subsample = 0.5,
-        min_child_weight = 1)
-    
-    ## Perform training
-    start <- Sys.time() #Start timer
-    xgbmod <- train(
-        x = X.train,
-        y = Y.train,
-        method = 'xgbTree',
-        metric = metric,
-        trControl = ts.control,
-        tuneGrid = tuneGridXGB,
-        importance=TRUE)
-    print(Sys.time() - start)
-    cat("\nXGB Output\n")
-    print(xgbmod)
-    print(plot(xgbmod))
-    
-    ## Evaluate metrics
-    r2.train <- rSquared(Y.train, Y.train - predict(xgbmod, X.train))
-    r2.pred <- rSquared(Y.test, Y.test - predict(xgbmod, X.test))
-    mse.train <- mean((Y.train - predict(xgbmod, X.train))^2)
-    mse.pred <- mean((Y.test - predict(xgbmod, X.test))^2)
-    rmse.train <- sqrt(mse.train)
-    rmse.pred <- sqrt(mse.pred)
-    mae.train <- mean(abs(Y.train - predict(xgbmod, X.train)))
-    mae.pred <- mean(abs(Y.test - predict(xgbmod, X.test)))
-    mape.train <- MAPE(Y.train, predict(xgbmod, X.train))
-    mape.pred <- MAPE(Y.test, predict(xgbmod, X.test))
-    
-    ## Plot Rsquared Evaluation
-    p <- ggplot(aes(x=actual, y=pred),
-                data=data.frame(actual=Y.train, pred=predict(xgbmod, X.train)))
-    print(p + geom_point() +
-        geom_abline(color="red") +
-        ggtitle(paste("XGBoost Regression in R r^2=", r2.train, sep="")))
-    
-    p <- ggplot(aes(x=actual, y=pred),
-                data=data.frame(actual=Y.test, pred=predict(xgbmod, X.test)))
-    print(p + geom_point() +
-        geom_abline(color="red") +
-        ggtitle(paste("XGBoost Regression in R r^2=", r2.pred, sep="")))
-    
-    if(xform == "diff"){
-        ## Plot trained and predicted performance
-        plot(as.numeric(c(cumsum(c(orig.train.df$high[1], Y.train)), cumsum(c(orig.pred.df$high[1], Y.test)))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", main = paste(tick, "XGBoost Performance (Diff): Training + Prediction"))
-        axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
-        text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-        lines(c(cumsum(c(orig.train.df$high[1], predict(xgbmod, X.train))), cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test)))), type = "l", lty = 2, lwd = 2, col = "red")
-        abline(v = length(Y.train)+1, lty = 2, col = "blue")
+    tryCatch({
+        ## Write outputs to external files for later review
+        sink(paste0("doXGB_", tick, xform, "_", metric, ".txt"))
+        pdf(paste0('XGBplots_',tick, xform, '_', metric, '.pdf'))
         
-        ## Plot just predicted performance
-        plot(as.numeric(cumsum(c(orig.pred.df$high[1], Y.test))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test)))), max(c(cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test))))), main = paste(tick, "XGBoost Performance (Diff): Prediction"))
-        axis(1, at=1:(length(Y.test)), labels=FALSE)
-        text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-        lines(cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test))), type = "l", lty = 2, lwd = 2, col = "red")
-    }
-    else{
-        ## Plot trained and predicted performance
-        plot(as.numeric(c(Y.train, Y.test)), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", main = paste(tick, "XGBoost Performance: Training + Prediction"))
-        axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
-        text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-        lines(c(predict(xgbmod, train.df[,cols]),predict(xgbmod, X.test)), type = "l", lty = 2, lwd = 2, col = "red")
-        abline(v = length(Y.train)+1, lty = 2, col = "blue")
+        ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
+        ## Setup data
+        ## Setup data
+        cols <- colnames(train.df)
+        cols <- cols[!cols %in% c("date", "high")]
+        X.train <- data.matrix(train.df[,cols])
+        X.test <- data.matrix(pred.df[,cols])
+        Y.train <- train.df$high
+        Y.test <- pred.df$high
         
-        ## Plot just predicted performance
-        plot(as.numeric(Y.test), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", ylim = c(min(c(predict(xgbmod, X.test), Y.test)), max(c(predict(xgbmod, X.test), Y.test))), main = paste(tick, "XGBoost Performance: Prediction"))
-        axis(1, at=1:(length(Y.test)), labels=FALSE)
-        text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-        lines(predict(xgbmod, X.test), type = "l", lty = 2, lwd = 2, col = "red")
-    }
-    
-    feat.imp <- varImp(xgbmod)
-    
-    dev.off()
-    
-    sink()
-    
-    return(list(xgbmod, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
+        ## Create seeds
+        set.seed(123)
+        seeds <- vector(mode = "list", length = 44) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:43) seeds[[i]] <- sample.int(1000, 12) #sample.int second argument value based on expand.grid nrows
+        seeds[[44]] <- sample.int(1000, 1)
+        
+        ## Setup training parameters
+        ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE, search = "grid") #35 day cv training, 14 day cv testing
+        metric <- "RMSE"
+        tuneGridXGB <- expand.grid( #See parameter descriptions at http://xgboost.readthedocs.io/en/latest/parameter.html
+            nrounds=350,
+            eta = c(0.3, 0.5),
+            gamma = c(0, 1, 5),
+            max_depth = 6,
+            colsample_bytree = c(0.5, 1),
+            subsample = 0.5,
+            min_child_weight = 1)
+        
+        ## Perform training
+        start <- Sys.time() #Start timer
+        xgbmod <- train(
+            x = X.train,
+            y = Y.train,
+            method = 'xgbTree',
+            metric = metric,
+            trControl = ts.control,
+            tuneGrid = tuneGridXGB,
+            importance=TRUE)
+        print(Sys.time() - start)
+        cat("\nXGB Output\n")
+        print(xgbmod)
+        print(plot(xgbmod))
+        
+        ## Evaluate metrics
+        r2.train <- rSquared(Y.train, Y.train - predict(xgbmod, X.train))
+        r2.pred <- rSquared(Y.test, Y.test - predict(xgbmod, X.test))
+        mse.train <- mean((Y.train - predict(xgbmod, X.train))^2)
+        mse.pred <- mean((Y.test - predict(xgbmod, X.test))^2)
+        rmse.train <- sqrt(mse.train)
+        rmse.pred <- sqrt(mse.pred)
+        mae.train <- mean(abs(Y.train - predict(xgbmod, X.train)))
+        mae.pred <- mean(abs(Y.test - predict(xgbmod, X.test)))
+        mape.train <- MAPE(Y.train, predict(xgbmod, X.train))
+        mape.pred <- MAPE(Y.test, predict(xgbmod, X.test))
+        
+        ## Plot Rsquared Evaluation
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=Y.train, pred=predict(xgbmod, X.train)))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste("XGBoost Regression in R r^2=", r2.train, sep="")))
+        
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=Y.test, pred=predict(xgbmod, X.test)))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste("XGBoost Regression in R r^2=", r2.pred, sep="")))
+        
+        if(xform == "diff"){
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(cumsum(c(orig.train.df$high[1], Y.train)), cumsum(c(orig.pred.df$high[1], Y.test)))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", main = paste(tick, "XGBoost Performance (Diff): Training + Prediction"))
+            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
+            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(orig.train.df$high[1], predict(xgbmod, X.train))), cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test)))), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(Y.train)+1, lty = 2, col = "blue")
+            
+            ## Plot just predicted performance
+            plot(as.numeric(cumsum(c(orig.pred.df$high[1], Y.test))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test)))), max(c(cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test))))), main = paste(tick, "XGBoost Performance (Diff): Prediction"))
+            axis(1, at=1:(length(Y.test)), labels=FALSE)
+            text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test))), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        else{
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(Y.train, Y.test)), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", main = paste(tick, "XGBoost Performance: Training + Prediction"))
+            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
+            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(predict(xgbmod, train.df[,cols]),predict(xgbmod, X.test)), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(Y.train)+1, lty = 2, col = "blue")
+            
+            ## Plot just predicted performance
+            plot(as.numeric(Y.test), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", ylim = c(min(c(predict(xgbmod, X.test), Y.test)), max(c(predict(xgbmod, X.test), Y.test))), main = paste(tick, "XGBoost Performance: Prediction"))
+            axis(1, at=1:(length(Y.test)), labels=FALSE)
+            text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(predict(xgbmod, X.test), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        tryCatch({
+            feat.imp <- varImp(xgbmod)
+            print(plot(feat.imp, main = paste(tick, "RF Feature Importance")))
+            
+            on.exit(dev.off())
+            on.exit(sink(), add = TRUE)
+            return(list(xgbmod, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
+        }, error = function(e){
+            on.exit(dev.off())
+            on.exit(sink(), add = TRUE)
+            return(list(xgbmod, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), NA))
+        })
+    }, error = function(e){
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+        print(paste(tick, "XGB failed"))
+    })
     
 }
 
@@ -452,115 +467,120 @@ print(Sys.time() - startOverall)
 ######### Generate Linear Regression Model #########
 ####################################################
 doLM <- function(train.df, pred.df, tick, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
-    ## Write outputs to external files for later review
-    sink(paste0("doLM_", tick, xform, "_", metric, ".txt"))
-    pdf(paste0('LMplots_',tick, xform, "_", metric, '.pdf'))
-    
-    ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
-    ## Setup data
-    cols <- colnames(train.df)
-    cols <- cols[!cols %in% "date"]
-    
-    X.train <- train.df[,cols]
-    X.test <- pred.df[,cols]
-    Y.train <- train.df$high
-    Y.test <- pred.df$high
-    
-    ## Check for and remove collinearity between variables
-    repeat{
-        lc <- findLinearCombos(X.train[,!(colnames(X.train) %in% "high")])
-        if(!is.null(lc$remove)){
-            X.train <- X.train[,-lc$remove]
-            X.test <- X.test[,-lc$remove]
+    tryCatch({    
+        ## Write outputs to external files for later review
+        sink(paste0("doLM_", tick, xform, "_", metric, ".txt"))
+        pdf(paste0('LMplots_',tick, xform, "_", metric, '.pdf'))
+        
+        ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
+        ## Setup data
+        cols <- colnames(train.df)
+        cols <- cols[!cols %in% "date"]
+        
+        X.train <- train.df[,cols]
+        X.test <- pred.df[,cols]
+        Y.train <- train.df$high
+        Y.test <- pred.df$high
+        
+        ## Check for and remove collinearity between variables
+        repeat{
+            lc <- findLinearCombos(X.train[,!(colnames(X.train) %in% "high")])
+            if(!is.null(lc$remove)){
+                X.train <- X.train[,-lc$remove]
+                X.test <- X.test[,-lc$remove]
+            }
+            else break
         }
-        else break
-    }
+        
+        ## Create Random Forest seeds
+        set.seed(123)
+        
+        ## Setup training parameters
+        ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE) #35 day cv training, 14 day cv testing
+        tuneLength.num <- 2
+        #metric <- "RMSE"
+        
+        ## Perform training
+        start <- Sys.time() #Start timer
+        lm.mod <- train(high ~ ., data = X.train,
+                        method = "lm",
+                        metric = metric,
+                        trControl = ts.control,
+                        tuneLength=tuneLength.num)
+        print(Sys.time() - start)
+        cat("\nRF Output\n")
+        print(lm.mod)
+        
+        ## Evaluate metrics
+        r2.train <- rSquared(train.df$high, train.df$high - predict(lm.mod, train.df[,cols]))
+        r2.pred <- rSquared(pred.df$high, pred.df$high - predict(lm.mod, pred.df[,cols]))
+        mse.train <- mean((train.df$high - predict(lm.mod, train.df[,cols]))^2)
+        mse.pred <- mean((pred.df$high - predict(lm.mod, pred.df[,cols]))^2)
+        rmse.train <- sqrt(mse.train)
+        rmse.pred <- sqrt(mse.pred)
+        mae.train <- mean(abs(train.df$high - predict(lm.mod, train.df[,cols])))
+        mae.pred <- mean(abs(pred.df$high - predict(lm.mod, pred.df[,cols])))
+        mape.train <- MAPE(train.df$high, predict(lm.mod, train.df[,cols]))
+        mape.pred <- MAPE(pred.df$high, predict(lm.mod, pred.df[,cols]))
+        
+        
+        ## Plot Rsquared Evaluation
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=Y.train, pred=predict(lm.mod, X.train)))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, "Linear Regression: Training r^2 =", r2.train)))
+        
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=pred.df$high, pred=predict(lm.mod, pred.df[,cols])))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, "Linear Regression: Prediction r^2 =", r2.pred)))
+        
+        if(xform == "diff"){
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(cumsum(c(orig.train.df$high[1], Y.train)), cumsum(c(orig.pred.df$high[1], Y.test)))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", main = paste(tick, "LM Performance (Diff): Training + Prediction"))
+            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
+            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(orig.train.df$high[1], predict(lm.mod, X.train))), cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test)))), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(Y.train)+1, lty = 2, col = "blue")
     
-    ## Create Random Forest seeds
-    set.seed(123)
+            ## Plot just predicted performance
+            plot(as.numeric(cumsum(c(orig.pred.df$high[1], Y.test))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test)))), max(c(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test))))), main = paste(tick, "LM Performance (Diff): Prediction"))
+            axis(1, at=1:(length(Y.test)), labels=FALSE)
+            text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        else{
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(Y.train, Y.test)), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", main = paste(tick, "LM Performance: Training + Prediction"))
+            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
+            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(predict(lm.mod, train.df[,cols]),predict(lm.mod, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(Y.train)+1, lty = 2, col = "blue")
     
-    ## Setup training parameters
-    ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE) #35 day cv training, 14 day cv testing
-    tuneLength.num <- 2
-    #metric <- "RMSE"
+            ## Plot just predicted performance
+            plot(as.numeric(Y.test), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", ylim = c(min(c(predict(lm.mod, pred.df[,cols]), Y.test)), max(c(predict(lm.mod, pred.df[,cols]), Y.test))), main = paste(tick, "LM Performance: Prediction"))
+            axis(1, at=1:(length(Y.test)), labels=FALSE)
+            text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(predict(lm.mod, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
+        }
     
-    ## Perform training
-    start <- Sys.time() #Start timer
-    lm.mod <- train(high ~ ., data = X.train,
-                    method = "lm",
-                    metric = metric,
-                    trControl = ts.control,
-                    tuneLength=tuneLength.num)
-    print(Sys.time() - start)
-    cat("\nRF Output\n")
-    print(lm.mod)
-    
-    ## Evaluate metrics
-    r2.train <- rSquared(train.df$high, train.df$high - predict(lm.mod, train.df[,cols]))
-    r2.pred <- rSquared(pred.df$high, pred.df$high - predict(lm.mod, pred.df[,cols]))
-    mse.train <- mean((train.df$high - predict(lm.mod, train.df[,cols]))^2)
-    mse.pred <- mean((pred.df$high - predict(lm.mod, pred.df[,cols]))^2)
-    rmse.train <- sqrt(mse.train)
-    rmse.pred <- sqrt(mse.pred)
-    mae.train <- mean(abs(train.df$high - predict(lm.mod, train.df[,cols])))
-    mae.pred <- mean(abs(pred.df$high - predict(lm.mod, pred.df[,cols])))
-    mape.train <- MAPE(train.df$high, predict(lm.mod, train.df[,cols]))
-    mape.pred <- MAPE(pred.df$high, predict(lm.mod, pred.df[,cols]))
-    
-    
-    ## Plot Rsquared Evaluation
-    p <- ggplot(aes(x=actual, y=pred),
-                data=data.frame(actual=Y.train, pred=predict(lm.mod, X.train)))
-    print(p + geom_point() +
-        geom_abline(color="red") +
-        ggtitle(paste(tick, "Linear Regression: Training r^2 =", r2.train)))
-    
-    p <- ggplot(aes(x=actual, y=pred),
-                data=data.frame(actual=pred.df$high, pred=predict(lm.mod, pred.df[,cols])))
-    print(p + geom_point() +
-        geom_abline(color="red") +
-        ggtitle(paste(tick, "Linear Regression: Prediction r^2 =", r2.pred)))
-    
-    if(xform == "diff"){
-        ## Plot trained and predicted performance
-        plot(as.numeric(c(cumsum(c(orig.train.df$high[1], Y.train)), cumsum(c(orig.pred.df$high[1], Y.test)))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", main = paste(tick, "LM Performance (Diff): Training + Prediction"))
-        axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
-        text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-        lines(c(cumsum(c(orig.train.df$high[1], predict(lm.mod, X.train))), cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test)))), type = "l", lty = 2, lwd = 2, col = "red")
-        abline(v = length(Y.train)+1, lty = 2, col = "blue")
-
-        ## Plot just predicted performance
-        plot(as.numeric(cumsum(c(orig.pred.df$high[1], Y.test))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test)))), max(c(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test))))), main = paste(tick, "LM Performance (Diff): Prediction"))
-        axis(1, at=1:(length(Y.test)), labels=FALSE)
-        text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-        lines(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))), type = "l", lty = 2, lwd = 2, col = "red")
-    }
-    else{
-        ## Plot trained and predicted performance
-        plot(as.numeric(c(Y.train, Y.test)), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", main = paste(tick, "LM Performance: Training + Prediction"))
-        axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
-        text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-        lines(c(predict(lm.mod, train.df[,cols]),predict(lm.mod, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
-        abline(v = length(Y.train)+1, lty = 2, col = "blue")
-
-        ## Plot just predicted performance
-        plot(as.numeric(Y.test), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", ylim = c(min(c(predict(lm.mod, pred.df[,cols]), Y.test)), max(c(predict(lm.mod, pred.df[,cols]), Y.test))), main = paste(tick, "LM Performance: Prediction"))
-        axis(1, at=1:(length(Y.test)), labels=FALSE)
-        text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-        lines(predict(lm.mod, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
-    }
-
-    ## Get coefficients and confidence intervals
-    coeffs <- coef(lm.mod$finalModel)
-    confints <- confint(lm.mod$finalModel)
-    cat("/nCoefficients/n")
-    print(coeffs)
-    cat("/nConfidence Intervals/n")
-    print(confints)
-    
-    dev.off()
-    
-    sink()
+        ## Get coefficients and confidence intervals
+        coeffs <- coef(lm.mod$finalModel)
+        confints <- confint(lm.mod$finalModel)
+        cat("/nCoefficients/n")
+        print(coeffs)
+        cat("/nConfidence Intervals/n")
+        print(confints)
+        
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+    }, error = function(e){
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+        print(paste(tick, "LM failed"))
+    })
 
     return(list(lm.mod, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), coeffs, confints))
 }
@@ -627,6 +647,7 @@ compareMods <- function(pat){
     
     ## Get resample results for each model
     modList <- ls(pattern = paste0(pat,"."), envir=.GlobalEnv)
+    if(pat == 'PG') modList <- modList[!grepl('^SPG', modList)]
     comp <- lapply(modList, function(x) get(x)[[1]])
     names(comp) <- modList
     comp <- resamples(comp)
@@ -672,7 +693,7 @@ compareMods <- function(pat){
     assign(paste0('Comparison.', pat), modInfo, envir=.GlobalEnv)
     assign(paste0('Ranks.', pat), modRanks, envir=.GlobalEnv)
     
-    dev.off()
+    on.exit(dev.off())
     
     return(comp)
 }
