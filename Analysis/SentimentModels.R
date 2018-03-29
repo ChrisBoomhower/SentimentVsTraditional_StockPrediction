@@ -684,9 +684,9 @@ compareMods <- function(pat){
     
     ## Make final rankings
     modRanks <- data.frame(model.name, ticker, r2.train, r2.pred, mse.train, mse.pred, rmse.train, rmse.pred, mae.train, mae.pred, mape.train, mape.pred)
-    modRanks$rank.overall <- rank(rowSums(modRanks[,3:length(modRanks)], na.rm = TRUE))
-    modRanks$rank.train <- rank(rowSums(modRanks[,c(3,5,7,9,11)], na.rm = TRUE))
-    modRanks$rank.pred <- rank(rowSums(modRanks[,c(4,6,8,10,12)], na.rm = TRUE))
+    modRanks$rank.overall <- rank(rowSums(modRanks[,3:length(modRanks)], na.rm = TRUE), ties.method = "min")
+    modRanks$rank.train <- rank(rowSums(modRanks[,c(3,5,7,9,11)], na.rm = TRUE), ties.method = "min")
+    modRanks$rank.pred <- rank(rowSums(modRanks[,c(4,6,8,10,12)], na.rm = TRUE), ties.method = "min")
     
     
     ## Write to global variables
@@ -698,6 +698,7 @@ compareMods <- function(pat){
     return(comp)
 }
 
+## Compare models for each ticker
 compareMods('AAPL')
 compareMods('AMZN')
 compareMods('BA')
@@ -709,3 +710,52 @@ compareMods('PG')
 compareMods('SPG')
 compareMods('VZ')
 compareMods('XOM')
+
+###########################################
+######### Output data to Tableau ##########
+###########################################
+
+## Output data for visualization in Tableau
+allTickDF <- rbind(AAPL[[1]], AAPL[[2]]) #First, output non-diffed price and scores
+allTickDF$highDiff <- c(AAPL[[3]][[ncol(AAPL[[3]])]], AAPL[[4]][[ncol(AAPL[[4]])]])
+allTickDF$ticker <- 'AAPL'
+ticks10 <- c('AMZN', 'BA', 'DWDP', 'JNJ', 'JPM', 'NEE', 'PG', 'SPG', 'VZ', 'XOM')
+for(t in ticks10){
+    temp <- rbind(get(t)[[1]], get(t)[[2]])
+    temp$highDiff <- c(get(t)[[3]][[ncol(get(t)[[3]])]], get(t)[[4]][[ncol(get(t)[[4]])]])
+    temp$ticker <- t
+    allTickDF <- rbind(allTickDF, temp)
+}
+rm(t, temp, ticks10)
+write.csv(allTickDF, 'Data/Tableau/allTickDF.csv', row.names = FALSE)
+
+## Output feature importance where available
+featureRank <- data.frame(model = character(), ticker = character(), feature = character(), importance = numeric())
+decTrees <- ls(pattern = '.xgb.|.rf.')
+for (m in decTrees){
+    if(!is.na(get(m)[length(get(m))])){
+        temp <- data.frame(model = m, ticker = strsplit(m, '\\.')[[1]][1],
+                           feature = row.names(get(m)[[length(get(m))]][[1]]),
+                           importance = get(m)[[length(get(m))]][[1]])
+        featureRank <- rbind(featureRank, temp)
+    }
+}
+rm(m, temp, decTrees)
+write.csv(featureRank, 'Data/Tableau/featureRank.csv', row.names = FALSE)
+
+## Output metric and ranking tables
+comps <- ls(pattern = '^Comparison\\.')
+modelMetrics <- get(comps[1])
+for(c in comps[-1]){
+    modelMetrics <- rbind(modelMetrics, get(c))
+}
+rm(comps, c)
+write.csv(modelMetrics, 'Data/Tableau/modelMetrics.csv', row.names = FALSE)
+
+rankings <- ls(pattern = '^Ranks\\.')
+modelRanks <- get(rankings[1])
+for(r in rankings[-1]){
+    modelRanks <- rbind(modelRanks, get(r))
+}
+rm(rankings, r)
+write.csv(modelRanks, 'Data/Tableau/modelRanks.csv', row.names = FALSE)
