@@ -743,6 +743,23 @@ for (m in decTrees){
 rm(m, temp, decTrees)
 write.csv(featureRank, 'Data/Tableau/featureRank.csv', row.names = FALSE)
 
+## Output coefficients and confidence intervals where available
+coeffConfs <- data.frame(model = character(), ticker = character(), variable = character(),
+                          coeff = numeric(), confInt.Lower = numeric(), confInt.Upper = numeric())
+linMods <- ls(pattern = '.lm.')
+for (m in linMods){
+    if(!is.na(get(m)[length(get(m))])){
+        temp <- data.frame(model = m, ticker = strsplit(m, '\\.')[[1]][1],
+                           variable = names(get(m)[[length(get(m))-1]]),
+                           coeff = get(m)[[length(get(m))-1]],
+                           confInt.Lower = get(m)[[length(get(m))]][,1],
+                           confInt.Upper = get(m)[[length(get(m))]][,2])
+        coeffConfs <- rbind(coeffConfs, temp)
+    }
+}
+rm(m, temp, linMods)
+write.csv(coeffConfs, 'Data/Tableau/coeffConfs.csv', row.names = FALSE)
+
 ## Output metric and ranking tables
 comps <- ls(pattern = '^Comparison\\.')
 modelMetrics <- get(comps[1])
